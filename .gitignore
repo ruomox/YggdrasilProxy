@@ -1,0 +1,6 @@
+.idea
+assets
+build
+dist
+test
+*.spec
