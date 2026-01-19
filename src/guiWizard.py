@@ -71,7 +71,7 @@ class LoginWizard:
         # --- 登录区域 ---
         self._create_login_section(self.scrollable_frame)
 
-        # --- 高级设置区域 (新增) ---
+        # --- 高级设置区域 ---
         self._create_advanced_section(self.scrollable_frame)
 
         # --- 底部按钮 ---
@@ -109,7 +109,7 @@ class LoginWizard:
         ttk.Checkbutton(java_frame, text="启用内嵌精简 Java 作为最终兜底 (需要解压，占用额外空间)",
                         variable=self.enable_embedded_var).pack(anchor="w", pady=(5, 0))
 
-    # --- 修改点 2: 新增回调函数 ---
+    # --- 2: 回调函数 ---
     def _on_java_scan_finished(self, found_javas):
         """Java 扫描完成的回调"""
         # 尝试获取内嵌和已配置的 Java，合并列表

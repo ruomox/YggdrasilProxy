@@ -30,9 +30,9 @@ class ConfigManager:
             "configVersion": constants.CONFIG_VERSION,
             "real_java_path": None,
             "auth_encrypted": None,
-            "api_list": constants.DEFAULT_API_LIST,  # 新增：API 列表
-            "current_api_index": 0,  # 新增：当前选中的 API 索引
-            "spoof_version": constants.DEFAULT_SPOOF_VERSION    # 【新增】伪装版本号
+            "api_list": constants.DEFAULT_API_LIST,  # API 列表
+            "current_api_index": 0,  # 当前选中的 API 索引
+            "spoof_version": constants.DEFAULT_SPOOF_VERSION    # 伪装版本号
         }
         self._ensure_data_dir()
         self._load_or_create_key()
@@ -145,7 +145,7 @@ class ConfigManager:
         else:
             self._config_data["auth_encrypted"] = self._encrypt(auth_dict)
 
-    # --- 新增：API 管理相关 ---
+    # --- API 管理相关 ---
     def get_api_list(self):
         # 直接返回存储的列表，不做任何动态拼接
         return self._config_data.get("api_list", constants.DEFAULT_API_LIST)

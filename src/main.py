@@ -193,7 +193,7 @@ def main():
     auth_data = config_mgr.get_auth_data()
     real_java = config_mgr.get_real_java_path()
     current_api = config_mgr.get_current_api_config()  # 获取当前 API 配置
-    # 【新增】获取内嵌的 authlib-injector 路径
+    # 获取内嵌的 authlib-injector 路径
     injector_path = runtimeMGR.get_injector_jar()
 
     # 多重检查确保所有必要组件就位
@@ -211,7 +211,7 @@ def main():
     new_args.append(injector_arg)
     print(f"[{constants.PROXY_NAME}] 已注入 Authlib-Injector: {current_api['base_url']}", file=sys.stderr)
 
-    # 【新增】准备自定义版本标识字符串
+    # 准备自定义版本标识字符串
     # 这将显示在游戏主界面左下角
     my_branding = f"{constants.PROXY_NAME} v{constants.PROXY_VERSION}"
 
