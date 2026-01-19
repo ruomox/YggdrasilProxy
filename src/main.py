@@ -4,280 +4,318 @@ import os
 import subprocess
 import platform
 import re
-# 引入所有必要的模块，包括新的 injector
 from src import constants, javaScanner, authAPI, guiWizard, runtimeMGR
 from src.configMGR import config_mgr
 
 
-# ... (ensure_session_valid 函数逻辑无需改动，直接使用之前的版本) ...
+# ==============================================================================
+# 辅助函数
+# ==============================================================================
 def ensure_session_valid(force_settings=False):
-    """确保会话有效，处理刷新、重新登录和强制设置"""
+    """确保会话有效，处理刷新、重新登录"""
+    config_mgr.load()
     auth_data = config_mgr.get_auth_data()
     current_api = config_mgr.get_current_api_config()
     base_url = current_api.get("base_url")
 
-    # 情况 0: 强制显示设置界面
-    if force_settings:
-        print(f"[{constants.PROXY_NAME}] 检测到强制设置参数，打开设置界面。", file=sys.stderr)
-        if not guiWizard.show_wizard(is_relogin=False, force_show_settings=True):
-            print(f"[{constants.PROXY_NAME}] 设置未完成，退出。", file=sys.stderr)
-            sys.exit(1)
-        return  # 设置完成，理论上 auth_data 已更新，可以直接进入启动流程
-
-    # 情况 1: 没有授权数据 -> 首次运行
+    # 1. 无凭据 -> 登录
     if not auth_data:
-        print(f"[{constants.PROXY_NAME}] 未找到授权信息，启动初始化向导。", file=sys.stderr)
-        if not guiWizard.show_wizard(is_relogin=False):
-            print(f"[{constants.PROXY_NAME}] 初始化未完成，退出。", file=sys.stderr)
+        print(f"[{constants.PROXY_NAME}] 需要验证账号...", file=sys.stderr)
+        if not guiWizard.show_wizard(force_show_settings=False):
             sys.exit(1)
+        config_mgr.load()
         return
 
-    # 情况 2: 尝试静默验证
+    # 2. 有凭据 -> 验证
     access_token = auth_data.get("accessToken")
     client_token = auth_data.get("clientToken")
-    print(f"[{constants.PROXY_NAME}] 正在检查会话有效性...", file=sys.stderr)
-    # 确保配置文件里有 validate_url (兼容旧配置)
-    validate_url = f"{base_url}/authserver/validate"
-    if authAPI.validate(validate_url, access_token, client_token):
-        print(f"[{constants.PROXY_NAME}] 会话有效。", file=sys.stderr)
+
+    # 简单验证
+    if authAPI.validate(f"{base_url}/authserver/validate", access_token, client_token):
         return
 
-    # 情况 3: 验证失败，尝试后台刷新
-    print(f"[{constants.PROXY_NAME}] 会话失效，尝试后台刷新...", file=sys.stderr)
+    # 3. 验证失败 -> 刷新
+    print(f"[{constants.PROXY_NAME}] Token 失效，尝试刷新...", file=sys.stderr)
     try:
-        refresh_url = f"{base_url}/authserver/refresh"
-        data = authAPI.refresh(refresh_url, access_token, client_token)
-        print(f"[{constants.PROXY_NAME}] 刷新成功！更新本地凭据。", file=sys.stderr)
+        data = authAPI.refresh(f"{base_url}/authserver/refresh", access_token, client_token)
         auth_data["accessToken"] = data["accessToken"]
         if "clientToken" in data: auth_data["clientToken"] = data["clientToken"]
         config_mgr.set_auth_data(auth_data)
         config_mgr.save()
         return
-    except Exception as e:
-        print(f"[{constants.PROXY_NAME}] 刷新失败 ({e})。", file=sys.stderr)
+    except:
+        pass
 
-    # 情况 4: 刷新失败，强制重新登录
-    print(f"[{constants.PROXY_NAME}] 需要用户重新登录。", file=sys.stderr)
-    if not guiWizard.show_wizard(is_relogin=True):
-        print(f"[{constants.PROXY_NAME}] 重新登录未完成，退出。", file=sys.stderr)
+    # 4. 刷新失败 -> 重新登录
+    print(f"[{constants.PROXY_NAME}] 凭证过期，请重新登录。", file=sys.stderr)
+    if not guiWizard.show_wizard(force_show_settings=False):
         sys.exit(1)
+    config_mgr.load()
 
 
 def main():
-    # 1. 第一时间获取参数
     args = sys.argv[1:]
 
-    # 2. 判断意图
-    # 检查是否为版本检查
-    is_version_check = any(
-        arg.strip().lower() in ['-version', '--version', '-fullversion', '-showversion'] for arg in args)
-    is_launching_game = any(constants.MC_MAIN_CLASS in arg for arg in args)
+    # ========================== 1. 意图判断 ==========================
+    is_launching_game = False
+    if any(arg == "--accessToken" for arg in args):
+        is_launching_game = True
+    elif any(constants.MC_MAIN_CLASS in arg for arg in args):
+        is_launching_game = True
+    elif len(args) > 4 and any(arg.endswith(".jar") for arg in args):
+        is_launching_game = True
+
+    is_version_check = any(arg.strip().lower() in ['-version', '--version'] for arg in args)
     is_forcing_settings = any(arg.lower() in constants.SETTINGS_ARGS for arg in args)
 
-    # ==============================================================================
-    # 准备阶段：确定要使用的“演员” Java
-    # ==============================================================================
-    config_mgr.load()  # 提前加载配置
+    is_maintenance_mode = not is_launching_game and not is_forcing_settings
 
-    # 策略：优先用配置的外部 Java -> 其次扫描系统 Java -> 最后用内嵌 Java 兜底
+    # ========================== 2. 寻找 Actor Java (保留之前的解压修复) ==========================
+    config_mgr.load()
+
+    # 【修改点 1】只调用一次强制解压，并保存结果
+    # 这一步现在是强制的：清理旧文件 -> 解压新文件
+    embedded_java = runtimeMGR.get_fallback_java()
+
     actor_java = config_mgr.get_real_java_path()
 
+    # 策略 A: 优先扫系统 (如果配置里没有指定)
     if not actor_java or not os.path.exists(actor_java):
-        # 没有配置或配置无效，尝试扫描
-        print(f"[{constants.PROXY_NAME}] 未配置外部 Java，尝试扫描系统...", file=sys.stderr)
         candidates = javaScanner.find_java_candidates()
         if candidates:
             actor_java = candidates[0]
-            print(f"[{constants.PROXY_NAME}] 选中系统 Java: {actor_java}", file=sys.stderr)
         else:
-            # 扫描失败，检查是否启用了兜底方案
-            # 【修改】增加对 enable_embedded_java 的判断
-            if config_mgr.get_enable_embedded_java():
-                print(f"[{constants.PROXY_NAME}] 系统扫描失败，启用内嵌 Java 兜底 (将触发解压)。", file=sys.stderr)
-                # 只有在这里调用 get_fallback_java 才会触发解压
-                actor_java = runtimeMGR.get_fallback_java()
-            else:
-                print(f"[{constants.PROXY_NAME}] 系统扫描失败，且未启用内嵌 Java 兜底。", file=sys.stderr)
+            actor_java = None
 
+    # 【修改点 2】删除这里的重复调用
+    # 这里的 runtimeMGR.get_fallback_java() 删掉，因为上面已经做过了
+
+    # 策略 B: 系统无 -> 使用刚才解压好的内嵌 Java
     if not actor_java:
-        # 彻底绝望了
-        # 【修改】提示信息更明确
-        print(
-            f"[{constants.PROXY_NAME}] Critical Error: No usable Java environment found. Please install Java or enable embedded fallback in settings.",
-            file=sys.stderr)
-        sys.exit(1)
+        # 【修改点 3】直接使用变量 embedded_java，不再调用函数
+        if embedded_java and os.path.exists(embedded_java):
+            actor_java = embedded_java
 
-    # ==============================================================================
-    # 分支一：特洛伊木马模式 (The "Fake" Java Mode)
-    # ==============================================================================
-    if not is_launching_game and not is_forcing_settings:
+    # ========================== 3. 分支一：维护/欺骗模式 ==========================
+    if is_maintenance_mode:
         if is_version_check:
-            # 版本伪装逻辑
+            spoof_ver = config_mgr.get_spoof_version()
+            if not spoof_ver: sys.exit(subprocess.call([actor_java] + args))
             try:
-                # 获取配置的伪装版本
-                spoof_version = config_mgr.get_spoof_version()
-
-                # 【修改】如果未配置伪装版本，直接直通
-                if not spoof_version:
-                    ret_code = subprocess.call([actor_java] + args)
-                    sys.exit(ret_code)
-
-                # 运行选定的 Java，捕获输出
-                proc = subprocess.run(
-                    [actor_java] + args,
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                    text=True, check=False, errors='replace'  # 处理可能的编码问题
-                )
-
-                # 使用正则进行智能替换
-                # 匹配模式：version "任意数字.任意数字.任意数字_任意后缀"
-                version_pattern = re.compile(r'version\s+"(\d+(\.\d+)*(_\d+)?(-\w+)?)"')
-
+                proc = subprocess.run([actor_java] + args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                      errors='replace')
+                pattern = re.compile(r'version\s+"(\d+(\.\d+)*(_\d+)?(-\w+)?)"')
                 modified_stderr = proc.stderr
-                # 查找真实版本号
-                match = version_pattern.search(modified_stderr)
+                match = pattern.search(modified_stderr)
                 if match:
-                    real_version = match.group(1)
-                    # 如果真实版本与目标伪装版本不同，进行替换
-                    if real_version != spoof_version:
-                        # 只替换版本号部分，保留前后文，更真实
-                        modified_stderr = modified_stderr.replace(f'version "{real_version}"',
-                                                                  f'version "{spoof_version}"')
-                        # 尝试替换 build 版本信息 (更高级的伪装)
-                        # 例如把 (build 25...) 替换为 (build 17...)
-                        real_major = real_version.split('.')[0]
-                        spoof_major = spoof_version.split('.')[0]
-                        if real_major != spoof_major:
-                            modified_stderr = modified_stderr.replace(f'build {real_major}', f'build {spoof_major}')
-
-                # 输出最终结果
-                print(modified_stderr, file=sys.stderr, end='', flush=True)
-                if proc.stdout:
-                    print(proc.stdout, file=sys.stdout, end='', flush=True)
+                    real_ver = match.group(1)
+                    if real_ver != spoof_ver:
+                        modified_stderr = modified_stderr.replace(f'version "{real_ver}"', f'version "{spoof_ver}"')
+                        modified_stderr = modified_stderr.replace(f'build {real_ver.split(".")[0]}',
+                                                                  f'build {spoof_ver.split(".")[0]}')
+                print(modified_stderr, file=sys.stderr, end='')
+                if proc.stdout: print(proc.stdout, file=sys.stdout, end='')
                 sys.exit(proc.returncode)
-
-            except Exception as e:
-                # 伪装失败，直通兜底
-                print(f"[{constants.PROXY_NAME}] Warning: Version spoofing failed ({e}), passing through.",
-                      file=sys.stderr)
-                ret_code = subprocess.call([actor_java] + args)
-                sys.exit(ret_code)
+            except:
+                sys.exit(subprocess.call([actor_java] + args))
         else:
-            # 其他复杂检查，直通
-            try:
-                ret_code = subprocess.call([actor_java] + args)
-                sys.exit(ret_code)
-            except Exception as e:
-                sys.exit(1)
+            sys.exit(subprocess.call([actor_java] + args))
 
-    # ==============================================================================
-    # 分支二：代理模式 (The Proxy Mode)
-    # 启动游戏或强制设置
-    # ==============================================================================
+    # ========================== 4. 分支二：启动游戏模式 ==========================
 
-    # 3. 加载配置
+    # --- 加载配置 ---
     config_mgr.load()
 
     print("=" * 50, file=sys.stderr)
     print(f"[{constants.PROXY_NAME} v{constants.PROXY_VERSION}] 介入...", file=sys.stderr)
 
-    # 4. 核心业务：确保会话有效 (含 UI 弹出逻辑)
-    ensure_session_valid(force_settings=is_forcing_settings)
-
-    # 如果只是强制设置，设置完就退出
+    # --- 核心业务：确保会话有效 ---
+    # 如果是强制设置模式，且不启动游戏，在 ensure_session_valid 内部的弹窗关闭后直接退出
+    # 但为了逻辑严密，我们在这里处理纯设置逻辑
     if is_forcing_settings and not is_launching_game:
+        guiWizard.show_wizard(force_show_settings=True)
         print(f"[{constants.PROXY_NAME}] 设置完成。", file=sys.stderr)
         sys.exit(0)
 
-    # 5. 获取必要的启动信息
-    auth_data = config_mgr.get_auth_data()
+    # 1. 确保有 Real Java
     real_java = config_mgr.get_real_java_path()
-    current_api = config_mgr.get_current_api_config()  # 获取当前 API 配置
-    # 获取内嵌的 authlib-injector 路径
+    if not real_java or not os.path.exists(real_java):
+        # 优先尝试系统扫描，避免强制弹窗影响“无 Java 机器”的自动兜底体验
+        candidates = javaScanner.find_java_candidates()
+        if candidates:
+            real_java = candidates[0]
+            config_mgr.set_real_java_path(real_java)
+            config_mgr.save()
+        else:
+            # 系统仍无 Java：使用内嵌作为兜底“真实 Java”
+            if embedded_java and os.path.exists(embedded_java):
+                real_java = embedded_java
+            else:
+                print(f"[{constants.PROXY_NAME}] 请配置 Java 环境...", file=sys.stderr)
+                if not guiWizard.show_wizard(force_show_settings=True): sys.exit(1)
+                config_mgr.load()
+                real_java = config_mgr.get_real_java_path()
+
+    # 2. 确保 Token 有效
+    ensure_session_valid(force_settings=is_forcing_settings)
+
+    # 3. 获取启动信息
+    auth_data = config_mgr.get_auth_data()
+    current_api = config_mgr.get_current_api_config()
     injector_path = runtimeMGR.get_injector_jar()
 
-    # 多重检查确保所有必要组件就位
     if not auth_data or not real_java or not current_api or not injector_path:
-        print(f"[{constants.PROXY_NAME}] 严重错误：缺少必要信息（凭据/真实Java/API配置/Injector），无法启动。",
-              file=sys.stderr)
+        print(f"[{constants.PROXY_NAME}] 严重错误：缺少必要信息，无法启动。", file=sys.stderr)
         sys.exit(1)
 
-    # 6. 参数注入 (Token + Authlib-Injector)
-    new_args = []
+    # ==============================================================================
+    # 6. 参数精细化重组 (严格执行劈开参数逻辑)
+    # ==============================================================================
 
-    # 【修复 1】注入 authlib-injector (增加引号以支持带空格的路径)
-    # 格式: -javaagent:"/path/to/injector.jar"=https://yggdrasil.server.url
-    injector_arg = f"-javaagent:{injector_path}={current_api['base_url']}"
-    new_args.append(injector_arg)
-    print(f"[{constants.PROXY_NAME}] 已注入 Authlib-Injector: {current_api['base_url']}", file=sys.stderr)
+    final_cmd = []
 
-    # 准备自定义版本标识字符串
-    # 这将显示在游戏主界面左下角
-    my_branding = f"{constants.PROXY_NAME} v{constants.PROXY_VERSION}"
+    # 检查是否存在主类，作为分界线
+    if constants.MC_MAIN_CLASS in args:
+        # === 经典模式 (Vanilla / OptiFine) ===
+        original_jvm_args = []
+        original_game_args = []
+        main_class_found = False
 
-    skip_next = False
-    print(f"[{constants.PROXY_NAME}] 正在为用户 [{auth_data['name']}] 注入凭据与版本标识...", file=sys.stderr)
+        for arg in args:
+            if arg == constants.MC_MAIN_CLASS:
+                main_class_found = True
+                continue  # 主类名稍后单独加
 
-    # 过滤掉我们的设置参数
-    game_args = [arg for arg in args if arg.lower() not in constants.SETTINGS_ARGS]
+            if not main_class_found:
+                # 主类名之前 -> JVM 参数
+                if arg not in constants.SETTINGS_ARGS:
+                    original_jvm_args.append(arg)
+            else:
+                # 主类名之后 -> 游戏参数
+                if arg not in constants.SETTINGS_ARGS:
+                    original_game_args.append(arg)
 
-    for arg in game_args:
-        if skip_next:
-            skip_next = False
-            continue
+        # --- A. 构造 JVM 参数 ---
+        final_jvm_args = []
+        final_jvm_args.extend(original_jvm_args)
 
-        # 【修复 2】拦截启动器传入的原始 versionType (防止冲突)
-        if arg == "--versionType":
-            skip_next = True  # 跳过下一个参数（即原有的版本类型字符串，如 "release"）
-            continue  # 并且不把 "--versionType" 加进去
+        # 1. 注入 Authlib-Injector
+        final_jvm_args.append(f"-javaagent:{injector_path}={current_api['base_url']}")
 
-        # 注入认证参数
-        if arg == "--username":
-            new_args.extend(["--username", auth_data["name"]])
-            skip_next = True
-        elif arg == "--uuid":
-            new_args.extend(["--uuid", auth_data["uuid"]])
-            skip_next = True
-        elif arg == "--accessToken":
-            new_args.extend(["--accessToken", auth_data["accessToken"]])
-            skip_next = True
-        elif arg == "--userProperties":
-            new_args.extend(["--userProperties", "{}"])
-            skip_next = True
-        # 过滤掉启动器可能自带的旧 injector 参数，避免冲突
-        elif arg.startswith("-javaagent:") and "authlib-injector" in arg:
-            print(f"[{constants.PROXY_NAME}] 移除启动器自带的旧 Injector 参数: {arg}", file=sys.stderr)
-            continue
-        else:
-            new_args.append(arg)
+        # 2. 移除可能冲突的旧 Agent
+        final_jvm_args = [arg for arg in final_jvm_args if "authlib-injector" not in arg]
 
-    # 【修复 3】在最后强制追加我们自定义的 versionType
-    new_args.extend(["--versionType", my_branding])
+        # 3. 强制覆盖品牌 (JVM 属性)
+        final_jvm_args.append(f"-Dminecraft.launcher.brand={constants.PROXY_NAME}")
+        final_jvm_args.append(f"-Dminecraft.launcher.version={constants.PROXY_VERSION}")
 
-    # 7. 移交执行权给外部真实 JDK
-    print(f"[{constants.PROXY_NAME}] 转交控制权给外部真实 JDK: {real_java}", file=sys.stderr)
+        # --- B. 构造 游戏 参数 ---
+        final_game_args = []
+
+        skip_next = False
+        sensitive_keys = ["--username", "--uuid", "--accessToken", "--userProperties", "--versionType"]
+
+        for arg in original_game_args:
+            if skip_next:
+                skip_next = False
+                continue
+
+            # 严格拦截旧参数 (空格格式)
+            if arg in sensitive_keys:
+                skip_next = True
+                continue
+
+            # 严格拦截旧参数 (等号格式兼容，防止漏网)
+            is_assign = False
+            for k in sensitive_keys:
+                if arg.startswith(k + "="):
+                    is_assign = True
+                    break
+            if is_assign:
+                continue
+
+            final_game_args.append(arg)
+
+        # 注入认证信息
+        final_game_args.extend(["--username", auth_data["name"]])
+        final_game_args.extend(["--uuid", auth_data["uuid"]])
+        final_game_args.extend(["--accessToken", auth_data["accessToken"]])
+        final_game_args.extend(["--userProperties", "{}"])
+
+        # 注入自定义显示版本
+        my_branding = f"{constants.PROXY_NAME} v{constants.PROXY_VERSION}"
+        final_game_args.extend(["--versionType", my_branding])
+
+        # 组装
+        final_cmd = [real_java] + final_jvm_args + [constants.MC_MAIN_CLASS] + final_game_args
+
+    else:
+        # === 兼容模式 (Forge/Fabric) ===
+        # 找不到 MC_MAIN_CLASS，我们只能尽可能清洗，并按照 JVM在前 Game在后的原则注入
+
+        # 1. 头部 JVM 注入
+        jvm_inject = [
+            f"-javaagent:{injector_path}={current_api['base_url']}",
+            f"-Dminecraft.launcher.brand={constants.PROXY_NAME}",
+            f"-Dminecraft.launcher.version={constants.PROXY_VERSION}"
+        ]
+
+        # 2. 尾部 Game 注入
+        my_branding = f"{constants.PROXY_NAME} v{constants.PROXY_VERSION}"
+        game_inject = [
+            "--username", auth_data["name"],
+            "--uuid", auth_data["uuid"],
+            "--accessToken", auth_data["accessToken"],
+            "--userProperties", "{}",
+            "--versionType", my_branding
+        ]
+
+        # 3. 中间参数清洗
+        cleaned_args = []
+        skip_next = False
+        sensitive_keys = ["--username", "--uuid", "--accessToken", "--userProperties", "--versionType"]
+
+        for arg in args:
+            if skip_next:
+                skip_next = False
+                continue
+
+            # 过滤 Game 参数
+            if arg in sensitive_keys:
+                skip_next = True
+                continue
+
+            # 过滤 JVM Brand (如果启动器传了)
+            if arg.startswith("-Dminecraft.launcher.brand=") or arg.startswith("-Dminecraft.launcher.version="):
+                continue
+
+            # 过滤 Injector
+            if "authlib-injector" in arg:
+                continue
+
+            # 过滤设置参数
+            if arg in constants.SETTINGS_ARGS:
+                continue
+
+            cleaned_args.append(arg)
+
+        final_cmd = [real_java] + jvm_inject + cleaned_args + game_inject
+
+    print(f"[{constants.PROXY_NAME}] 启动参数重组完毕，转交控制权...", file=sys.stderr)
     print("=" * 50, file=sys.stderr)
 
+    # 7. 最终执行
     try:
-        # Windows 下确保以 .exe 结尾
-        if platform.system() == "Windows" and not real_java.lower().endswith(".exe"):
-            real_java += ".exe"
-
-        # 执行启动
         if platform.system() == "Windows":
-            sys.exit(subprocess.call([real_java] + new_args))
+            if not final_cmd[0].lower().endswith(".exe"):
+                final_cmd[0] += ".exe"
+            sys.exit(subprocess.call(final_cmd))
         else:
-            os.execv(real_java, [real_java] + new_args)
+            os.execv(real_java, final_cmd)
 
     except OSError as e:
         err_msg = f"无法启动外部真实 JDK 进程:\n{real_java}\n\n错误信息: {e}"
         print(f"[{constants.PROXY_NAME}] {err_msg}", file=sys.stderr)
-        # 在非版本检查模式下，弹窗提示错误
-        try:
-            import tkinter.messagebox
-            tkinter.messagebox.showerror(f"{constants.PROXY_NAME} 严重错误", err_msg)
-        except:
-            pass
         sys.exit(1)
 
 

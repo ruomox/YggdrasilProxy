@@ -6,485 +6,377 @@ import threading
 import tkinter as tk
 from tkinter import messagebox, filedialog, ttk
 import requests
-from src import constants, authAPI, javaScanner, runtimeMGR
+from src import constants, authAPI, javaScanner
 from src.configMGR import config_mgr
+
+# ================= 暗色主题配置 =================
+SYSTEM = platform.system()
+FONT_FAMILY = "Microsoft YaHei UI" if SYSTEM == "Windows" else "PingFang SC"
+if SYSTEM == "Linux": FONT_FAMILY = "DejaVu Sans"
+
+COLOR_BG = "#1E1E1E";
+COLOR_PANEL = "#252526";
+COLOR_BORDER = "#3E3E42"
+COLOR_TEXT = "#CCCCCC";
+COLOR_TEXT_DIM = "#858585"
+COLOR_ACCENT = "#007ACC";
+COLOR_ACCENT_HOVER = "#0098FF"
+COLOR_INPUT_BG = "#3C3C3C";
+COLOR_ERROR = "#F48771"
 
 
 class LoginWizard:
-    def __init__(self, is_relogin=False, force_show_settings=False):
-        self.is_relogin = is_relogin
+    def __init__(self, force_show_settings=False):
+        # 仅保留 force_show_settings，用于区分是“强制设置”还是“启动前检查”
         self.force_show_settings = force_show_settings
         self.setup_success = False
+        self.temp_auth_data = None
+        self.temp_available_profiles = []
+
         self.window = tk.Tk()
-        self._setup_ui()
+        self._init_styles()
+        self._setup_window()
+        self._build_layout()
 
-    def _setup_ui(self):
-        title_prefix = f"{constants.PROXY_NAME} - "
-        if self.is_relogin:
-            title = title_prefix + "会话失效，请重新登录"
-        elif self.force_show_settings:
-            title = title_prefix + "设置"
-        else:
-            title = title_prefix + "初始化向导"
-
-        self.window.title(title)
-        # 设定最小尺寸，防止界面过于拥挤
-        self.window.minsize(500, 650)
-
+    def _init_styles(self):
         style = ttk.Style()
         style.theme_use('clam')
+        style.configure(".", background=COLOR_BG, foreground=COLOR_TEXT, font=(FONT_FAMILY, 9), borderwidth=0)
+        style.configure("Bg.TFrame", background=COLOR_BG)
+        style.configure("Panel.TFrame", background=COLOR_PANEL)
+        style.configure("Card.TLabelframe", background=COLOR_PANEL, bordercolor=COLOR_BORDER, relief="solid",
+                        borderwidth=1)
+        style.configure("Card.TLabelframe.Label", background=COLOR_PANEL, foreground=COLOR_ACCENT,
+                        font=(FONT_FAMILY, 10, "bold"))
+        style.configure("TEntry", fieldbackground=COLOR_INPUT_BG, foreground="white", bordercolor=COLOR_BORDER,
+                        padding=5)
+        style.map("TEntry", bordercolor=[("focus", COLOR_ACCENT)])
+        style.configure("TCombobox", fieldbackground=COLOR_INPUT_BG, background=COLOR_PANEL, foreground="white",
+                        arrowcolor=COLOR_TEXT)
+        style.map("TCombobox", fieldbackground=[("readonly", COLOR_INPUT_BG)],
+                  selectbackground=[("readonly", COLOR_ACCENT)])
+        style.configure("Primary.TButton", background=COLOR_ACCENT, foreground="white", borderwidth=0,
+                        font=("Arial", 9, "bold"), padding=6)
+        style.map("Primary.TButton", background=[('active', COLOR_ACCENT_HOVER), ('disabled', '#333333')],
+                  foreground=[('disabled', '#888888')])
+        style.configure("Secondary.TButton", background="#3E3E42", foreground="white", borderwidth=0, padding=4)
+        style.map("Secondary.TButton", background=[('active', '#505050')])
+        style.configure("Dark.TCheckbutton", background=COLOR_BG, foreground=COLOR_TEXT_DIM)
+        style.map("Dark.TCheckbutton", background=[('active', COLOR_BG)])
+        style.configure("Header.TLabel", background=COLOR_BG, foreground="white", font=(FONT_FAMILY, 16, "bold"))
+        style.configure("SubHeader.TLabel", background=COLOR_BG, foreground=COLOR_TEXT_DIM)
+        style.configure("CardHeader.TLabel", background=COLOR_PANEL, foreground=COLOR_ACCENT,
+                        font=(FONT_FAMILY, 10, "bold"))
 
-        # 主滚动区域 (防止屏幕太小显示不全)
-        main_canvas = tk.Canvas(self.window)
-        scrollbar = ttk.Scrollbar(self.window, orient="vertical", command=main_canvas.yview)
-        self.scrollable_frame = ttk.Frame(main_canvas, padding="20")
-
-        self.scrollable_frame.bind(
-            "<Configure>",
-            lambda e: main_canvas.configure(
-                scrollregion=main_canvas.bbox("all")
-            )
-        )
-
-        main_canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
-        main_canvas.configure(yscrollcommand=scrollbar.set)
-
-        main_canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-
-        # 标题
-        ttk.Label(self.scrollable_frame, text=title, font=("Arial", 14, "bold")).pack(pady=(0, 20), anchor="center")
-
-        if self.is_relogin:
-            ttk.Label(self.scrollable_frame, text="您的登录信息已过期，需要重新验证。", foreground="red").pack(
-                pady=(0, 10))
-
-        # --- Java 选择区域 ---
-        # 即使是重新登录，如果强制显示设置，也允许修改 Java
-        if not self.is_relogin or self.force_show_settings:
-            self.java_path_var = tk.StringVar(value=config_mgr.get_real_java_path() or "")
-            self._create_java_section(self.scrollable_frame)
-
-        # --- API 选择区域 ---
-        self._create_api_section(self.scrollable_frame)
-
-        # --- 登录区域 ---
-        self._create_login_section(self.scrollable_frame)
-
-        # --- 高级设置区域 ---
-        self._create_advanced_section(self.scrollable_frame)
-
-        # --- 底部按钮 ---
-        btn_text = "保存设置" if (self.force_show_settings and not self.is_relogin) else "登录并保存"
-        self.login_btn = ttk.Button(self.scrollable_frame, text=btn_text, command=self._start_login_thread,
-                                    style="Accent.TButton")
-        self.login_btn.pack(fill="x", pady=(20, 0))
-
-        # 绑定鼠标滚轮事件
-        self.window.bind_all("<MouseWheel>", lambda e: main_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
-        self.window.bind('<Return>', lambda e: self._start_login_thread())
+    def _setup_window(self):
+        self.window.title(f"{constants.PROXY_NAME} 配置")
+        self.window.config(bg=COLOR_BG)
+        w, h = 520, 750
+        sw, sh = self.window.winfo_screenwidth(), self.window.winfo_screenheight()
+        self.window.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
+        self.window.minsize(450, 600)
         self.window.protocol("WM_DELETE_WINDOW", sys.exit)
 
-        self._center_window()
+    def _build_layout(self):
+        canvas = tk.Canvas(self.window, bg=COLOR_BG, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(self.window, orient="vertical", command=canvas.yview)
+        self.content = ttk.Frame(canvas, style="Bg.TFrame")
 
-    def _create_java_section(self, parent):
-        java_frame = ttk.LabelFrame(parent, text="外部 Java 运行环境 (游戏主力)", padding="10")
-        java_frame.pack(fill="x", pady=(0, 15))
+        self.content.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        self.win_id = canvas.create_window((0, 0), window=self.content, anchor="nw")
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(self.win_id, width=e.width))
+        canvas.configure(yscrollcommand=scrollbar.set)
 
-        ttk.Label(java_frame, text="请选择用于运行游戏的真实 JDK (推荐 Java 17+):", font=("Arial", 9)).pack(anchor="w",
-                                                                                                            pady=(0, 5))
+        scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        self.window.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
 
-        input_frame = ttk.Frame(java_frame)
-        input_frame.pack(fill="x")
+        self._ui_header()
+        self.java_path_var = tk.StringVar(value=config_mgr.get_real_java_path() or "")
+        self._ui_java_card()
+        self._ui_api_card()
+        self._ui_login_card()
+        self._ui_advanced_card()
+        self._ui_footer()
 
-        self.java_combo = ttk.Combobox(input_frame, textvariable=self.java_path_var, width=50, state="readonly")
-        self.java_combo.set("正在扫描系统 Java...")
-        self.java_combo.pack(side="left", fill="x", expand=True, padx=(0, 10))
+    def _ui_header(self):
+        f = ttk.Frame(self.content, style="Bg.TFrame", padding=(25, 30, 25, 10))
+        f.pack(fill="x")
+        title_txt = "环境设置" if self.force_show_settings else "欢迎使用"
+        ttk.Label(f, text=title_txt, style="Header.TLabel").pack(anchor="w")
+        ttk.Label(f, text="配置 Java 环境与 Yggdrasil 账号。", style="SubHeader.TLabel").pack(anchor="w", pady=(5, 0))
 
+    def _ui_java_card(self):
+        card = ttk.LabelFrame(self.content, style="Card.TLabelframe", padding=15)
+        card.pack(fill="x", padx=20, pady=10)
+        ttk.Label(card, text="Java 运行环境", style="CardHeader.TLabel").pack(anchor="w", pady=(0, 10))
+
+        box = ttk.Frame(card, style="Panel.TFrame")
+        box.pack(fill="x")
+        self.java_combo = ttk.Combobox(box, textvariable=self.java_path_var, style="TCombobox")
+        self.java_combo.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        self.java_combo.set("扫描中...")
+        ttk.Button(box, text="浏览", style="Secondary.TButton", width=6, command=self._browse_java).pack(side="right")
+
+        tk.Label(card, text="* 必填，请选择本机安装的 Java 17 或更高版本。", bg=COLOR_PANEL, fg=COLOR_TEXT_DIM,
+                 font=("Arial", 8), anchor="w").pack(fill="x", pady=(5, 0))
         javaScanner.start_scan(self._on_java_scan_finished)
 
-        ttk.Button(input_frame, text="浏览...", command=self._browse_java).pack(side="right")
+    def _ui_api_card(self):
+        card = ttk.LabelFrame(self.content, style="Card.TLabelframe", padding=15)
+        card.pack(fill="x", padx=20, pady=10)
 
-        self.enable_embedded_var = tk.BooleanVar(value=config_mgr.get_enable_embedded_java())
-        ttk.Checkbutton(java_frame, text="启用内嵌精简 Java 作为最终兜底 (需要解压，占用额外空间)",
-                        variable=self.enable_embedded_var).pack(anchor="w", pady=(5, 0))
+        ttk.Label(card, text="认证服务器 (API)", style="CardHeader.TLabel").pack(anchor="w", pady=(0, 10))
 
-    # --- 2: 回调函数 ---
-    def _on_java_scan_finished(self, found_javas):
-        """Java 扫描完成的回调"""
-        # 尝试获取内嵌和已配置的 Java，合并列表
-        embedded_java = runtimeMGR.get_fallback_java()
-        if embedded_java and embedded_java not in found_javas:
-            found_javas.append(embedded_java)
-
-        current_configured = config_mgr.get_real_java_path()
-        if current_configured and current_configured not in found_javas and os.path.exists(current_configured):
-            found_javas.append(current_configured)
-
-        found_javas = sorted(list(set(found_javas)))
-
-        # 在主线程更新 UI
-        self.window.after(0, lambda: self._update_java_combo(found_javas, embedded_java))
-        # 可选：扫描完成后弹个小提示
-        # self.window.after(0, lambda: messagebox.showinfo("提示", f"Java 扫描完成，找到 {len(found_javas)} 个可用环境。"))
-
-    def _create_api_section(self, parent):
-        api_frame = ttk.LabelFrame(parent, text="认证服务器 (API)", padding="10")
-        api_frame.pack(fill="x", pady=(0, 15))
-
-        api_list = config_mgr.get_api_list()
-        api_names = [api['name'] for api in api_list]
-        self.api_combo = ttk.Combobox(api_frame, values=api_names, state="readonly")
+        # API 列表
+        apis = config_mgr.get_api_list()
+        names = [a['name'] for a in apis]
+        self.api_combo = ttk.Combobox(card, values=names, state="readonly", style="TCombobox")
         self.api_combo.current(config_mgr.get_current_api_index())
-        self.api_combo.pack(fill="x", pady=(0, 10))
+        self.api_combo.pack(fill="x", pady=(0, 8))
         self.api_combo.bind("<<ComboboxSelected>>", self._on_api_selected)
 
+        # URL 框
         self.api_url_var = tk.StringVar()
-        self.api_url_entry = ttk.Entry(api_frame, textvariable=self.api_url_var, state="readonly")
-        self.api_url_entry.pack(fill="x", pady=(0, 5))
-        ttk.Label(api_frame, text="* 请输入 API 基础地址 (例如 https://littleskin.cn/api/yggdrasil)。", font=("Arial", 8), foreground="gray").pack(anchor="w")
+        # 【关键修复】这里必须赋值给 self 变量，否则后面 _on_api_selected 会报错
+        self.api_url_entry = ttk.Entry(card, textvariable=self.api_url_var, state="readonly")
+        self.api_url_entry.pack(fill="x", pady=(0, 8))
 
-        btn_frame = ttk.Frame(api_frame)
-        btn_frame.pack(fill="x", pady=(5, 0))
+        # 按钮组
+        btn_box = ttk.Frame(card, style="Panel.TFrame")
+        btn_box.pack(fill="x")
 
-        self.new_api_btn = ttk.Button(btn_frame, text="新建/自定义", command=self._enable_api_edit)
-        self.new_api_btn.pack(side="left", padx=(0, 5))
-
-        self.save_api_btn = ttk.Button(btn_frame, text="保存 API", command=self._save_current_api, state="disabled")
+        ttk.Button(btn_box, text="新建", style="Secondary.TButton", width=5, command=self._new_api).pack(side="left",
+                                                                                                         padx=(0, 5))
+        self.save_api_btn = ttk.Button(btn_box, text="保存", style="Secondary.TButton", width=5, command=self._save_api,
+                                       state="disabled")
         self.save_api_btn.pack(side="left", padx=(0, 5))
-
-        self.del_api_btn = ttk.Button(btn_frame, text="删除", command=self._delete_current_api)
+        self.del_api_btn = ttk.Button(btn_box, text="删除", style="Secondary.TButton", width=5, command=self._del_api)
         self.del_api_btn.pack(side="right")
 
         self._on_api_selected()
 
-    def _create_login_section(self, parent):
-        login_frame = ttk.LabelFrame(parent, text="账号信息", padding="10")
-        login_frame.pack(fill="x", pady=(0, 15))
+    def _ui_login_card(self):
+        card = ttk.LabelFrame(self.content, style="Card.TLabelframe", padding=15)
+        card.pack(fill="x", padx=20, pady=10)
+        ttk.Label(card, text="账号验证", style="CardHeader.TLabel").pack(anchor="w", pady=(0, 10))
 
-        ttk.Label(login_frame, text="邮箱/用户名:").pack(anchor="w")
-        self.email_entry = ttk.Entry(login_frame, width=40)
-        self.email_entry.pack(fill="x", pady=(5, 10))
+        tk.Label(card, text="账号 / 邮箱:", bg=COLOR_PANEL, fg=COLOR_TEXT).pack(anchor="w", pady=(0, 2))
+        self.email_combo = ttk.Combobox(card, style="TCombobox")
+        self.email_combo.pack(fill="x", pady=(0, 10))
 
-        ttk.Label(login_frame, text="密码:").pack(anchor="w")
-        self.pwd_entry = ttk.Entry(login_frame, show="*", width=40)
-        self.pwd_entry.pack(fill="x", pady=(5, 10))
+        try:
+            if hasattr(config_mgr, 'get_history_users'):
+                history = config_mgr.get_history_users()
+                if history:
+                    self.email_combo['values'] = history
+                    self.email_combo.current(0)
+        except:
+            pass
+        if not self.email_combo.get():
+            curr = config_mgr.get_auth_data()
+            if curr and curr.get("name"): self.email_combo.set(curr["name"])
 
-        old_auth = config_mgr.get_auth_data()
-        if self.is_relogin and old_auth and old_auth.get("name"):
-            ttk.Label(login_frame, text=f"当前角色: {old_auth['name']}").pack(anchor="e")
+        tk.Label(card, text="密码:", bg=COLOR_PANEL, fg=COLOR_TEXT).pack(anchor="w", pady=(0, 2))
+        self.pwd_entry = ttk.Entry(card, show="•")
+        self.pwd_entry.pack(fill="x", pady=(0, 15))
 
-    def _create_advanced_section(self, parent):
-        # 创建一个可折叠的高级设置区域
-        self.adv_frame = ttk.LabelFrame(parent, text="高级设置 (可选)", padding="10")
-        self.adv_frame.pack(fill="x", pady=(0, 10))
+        self.verify_btn = ttk.Button(card, text="验证账号", style="Primary.TButton", command=self._on_verify)
+        self.verify_btn.pack(fill="x", pady=(0, 15))
 
-        # 默认收起，通过一个变量控制显示
-        self.show_adv_var = tk.BooleanVar(value=False)
+        self.profile_frame = ttk.Frame(card, style="Panel.TFrame")
+        self.profile_frame.pack(fill="x")
+        tk.Label(self.profile_frame, text="选择角色:", bg=COLOR_PANEL, fg=COLOR_TEXT).pack(anchor="w", pady=(0, 2))
+        self.profile_combo = ttk.Combobox(self.profile_frame, state="disabled", style="TCombobox")
+        self.profile_combo.set("请先验证账号")
+        self.profile_combo.pack(fill="x")
 
-        # 切换按钮
-        toggle_btn = ttk.Checkbutton(self.adv_frame, text="显示高级选项", variable=self.show_adv_var,
-                                     command=self._toggle_advanced)
-        toggle_btn.pack(anchor="w", pady=(0, 10))
+    def _ui_advanced_card(self):
+        f = ttk.Frame(self.content, style="Bg.TFrame", padding=(20, 0))
+        f.pack(fill="x")
+        self.show_adv = tk.BooleanVar(value=False)
+        self.adv_box = ttk.Frame(self.content, style="Bg.TFrame", padding=(20, 5, 20, 5))
 
-        # 内容容器
-        self.adv_content_frame = ttk.Frame(self.adv_frame)
+        def toggle():
+            if self.show_adv.get():
+                self.adv_box.pack(fill="x")
+            else:
+                self.adv_box.pack_forget()
 
-        # --- 伪装版本设置 ---
-        ttk.Label(self.adv_content_frame, text="伪装 Java 版本号:").pack(anchor="w")
-        self.spoof_version_var = tk.StringVar(value=config_mgr.get_spoof_version())
-        spoof_entry = ttk.Entry(self.adv_content_frame, textvariable=self.spoof_version_var, width=20)
-        spoof_entry.pack(anchor="w", pady=(5, 0))
-        ttk.Label(self.adv_content_frame, text="* 用于欺骗启动器的版本检查，建议保持默认 (如 17.0.9)。",
-                  font=("Arial", 8), foreground="gray").pack(anchor="w", pady=(0, 10))
+        ttk.Checkbutton(f, text="显示高级选项", variable=self.show_adv, command=toggle, style="Dark.TCheckbutton").pack(
+            anchor="w")
 
-        # 初始化折叠状态
-        self._toggle_advanced()
+        self.spoof_var = tk.StringVar(value=config_mgr.get_spoof_version())
+        tk.Label(self.adv_box, text="伪装 Java 版本:", bg=COLOR_BG, fg=COLOR_TEXT).pack(anchor="w")
+        ttk.Entry(self.adv_box, textvariable=self.spoof_var).pack(fill="x")
+        tk.Label(self.adv_box, text="* 留空默认。用于绕过启动器版本检查。", bg=COLOR_BG, fg=COLOR_TEXT_DIM,
+                 font=("Arial", 8)).pack(anchor="w")
 
-    def _toggle_advanced(self):
-        if self.show_adv_var.get():
-            self.adv_content_frame.pack(fill="x", expand=True)
-        else:
-            self.adv_content_frame.pack_forget()
+    def _ui_footer(self):
+        f = ttk.Frame(self.content, style="Bg.TFrame", padding=20)
+        f.pack(fill="x", side="bottom")
+        txt = "保存设置" if self.force_show_settings else "启动游戏"
+        self.launch_btn = ttk.Button(f, text=txt, style="Primary.TButton", command=self._on_launch)
+        self.launch_btn.pack(fill="x", ipady=8)
 
-    # --- 事件处理 ---
-    def _run_java_scan(self):
-        # 扫描系统 Java
-        found_javas = javaScanner.find_java_candidates()
+    # 逻辑部分
+    def _on_java_scan_finished(self, paths):
+        curr = config_mgr.get_real_java_path()
+        if curr and curr not in paths and os.path.exists(curr): paths.append(curr)
+        paths = sorted(list(set(paths)))
+        self.window.after(0, lambda: self._upd_java(paths))
 
-        # 尝试获取已解压的内嵌 Java
-        embedded_java = runtimeMGR.get_fallback_java(force=False)
-        if embedded_java and embedded_java not in found_javas:
-            # 将内嵌 Java 加入列表，并使用特殊标识
-            found_javas.append(embedded_java)
-
-        # 如果有已配置的路径，也加入
-        current_configured = config_mgr.get_real_java_path()
-        if current_configured and current_configured not in found_javas and os.path.exists(current_configured):
-            found_javas.append(current_configured)
-
-        # 排序并去重
-        found_javas = sorted(list(set(found_javas)))
-
-        self.window.after(0, lambda: self._update_java_combo(found_javas, embedded_java))
-
-    def _update_java_combo(self, found_javas, embedded_java_path):
+    def _upd_java(self, paths):
         if not self.window.winfo_exists(): return
-
-        display_values = []
-        real_values = []
-
-        # 构建显示列表，加入版本信息
-        for path in found_javas:
-            real_values.append(path)
-
-            # 获取版本信息
-            # 注意：虽然这里再次调用了 subprocess，但由于刚才的扫描已经预热了系统缓存，
-            # 且我们加了 1 秒超时，这里通常会很快。
-            raw_ver = javaScanner.get_java_version(path)
-
-            # 格式化显示字符串
-            if raw_ver:
-                # 清理版本号字符串 (去除 "java version", 引号等)
-                clean_ver = raw_ver.replace('"', '').strip()
-                if "version" in clean_ver.lower():
-                    # 例如 "java version 1.8.0_202" -> "1.8.0_202"
-                    clean_ver = clean_ver.split('version')[-1].strip()
-
-                # 最终显示格式: "17.0.1 (C:\Path\To\Java)"
-                label = f"{clean_ver} ({path})"
-            else:
-                label = path
-
-            # 为内嵌 Java 加上特殊前缀
-            if path == embedded_java_path:
-                display_values.append(f"[内嵌] {label}")
-            else:
-                display_values.append(label)
-
-        self.java_combo['values'] = display_values
-        self.java_combo_real_values = real_values  # 存储真实路径映射
-
-        # 恢复之前的选中状态
-        current_path = self.java_path_var.get()
-        if current_path:
-            if current_path in real_values:
-                idx = real_values.index(current_path)
-                self.java_combo.current(idx)
-            elif embedded_java_path and current_path == embedded_java_path:
-                # 处理已配置为内嵌的情况
-                try:
-                    idx = real_values.index(embedded_java_path)
-                    self.java_combo.current(idx)
-                except ValueError:
-                    self.java_combo.set(current_path)  # 不在列表里就直接显示路径
-            else:
-                self.java_combo.set(current_path)  # 显示当前配置的路径
-        elif display_values:
-            self.java_combo.current(0)  # 默认选第一个
+        self.java_combo['values'] = paths
+        curr = self.java_path_var.get()
+        if curr and curr in paths:
+            self.java_combo.current(paths.index(curr))
+        elif paths:
+            self.java_combo.current(0)
         else:
-            self.java_combo.set("未找到可用 Java，请手动浏览...")
-
-        if display_values:
-            self.java_combo.state(["!readonly"])
+            self.java_combo.set("未找到 Java")
 
     def _browse_java(self):
-        filetypes = [("Java Executable", "java.exe"), ("All Files", "*")] if platform.system() == "Windows" else [
-            ("All Files", "*")]
-        filename = filedialog.askopenfilename(title="选择 java 或 javaw", filetypes=filetypes)
-        if filename:
-            self.java_path_var.set(filename)
-            # 如果选择的路径不在下拉列表里，添加到列表头并选中
-            if hasattr(self, 'java_combo_real_values') and filename not in self.java_combo_real_values:
-                current_display = list(self.java_combo['values'])
-                current_real = self.java_combo_real_values
-                self.java_combo['values'] = [filename] + current_display
-                self.java_combo_real_values = [filename] + current_real
-            try:
-                idx = self.java_combo_real_values.index(filename)
-                self.java_combo.current(idx)
-            except:
-                pass
+        ft = [("Java", "java.exe"), ("All", "*")] if platform.system() == "Windows" else [("All", "*")]
+        fn = filedialog.askopenfilename(filetypes=ft)
+        if fn:
+            self.java_path_var.set(fn)
+            self.java_combo.set(fn)
 
-    # ... (API 部分的处理函数 _on_api_selected, _enable_api_edit, _save_current_api, _delete_current_api 保持不变) ...
-    # 为节省篇幅，请直接复制上一版代码中对应的 API 处理函数
-    def _on_api_selected(self, event=None):
+    def _on_api_selected(self, e=None):
         idx = self.api_combo.current()
-        api_list = config_mgr.get_api_list()
-        if 0 <= idx < len(api_list):
-            self.api_url_var.set(api_list[idx]["base_url"])
+        l = config_mgr.get_api_list()
+        if 0 <= idx < len(l):
+            self.api_url_var.set(l[idx]["base_url"])
             self.api_url_entry.config(state="readonly")
             self.save_api_btn.config(state="disabled")
-            if idx == 0:
-                self.del_api_btn.config(state="disabled")
-            else:
-                self.del_api_btn.config(state="normal")
+            self.del_api_btn.config(state="disabled" if idx == 0 else "normal")
         config_mgr.set_current_api_index(idx)
 
-    def _enable_api_edit(self):
-        self.api_combo.set("自定义 API (未保存)")
+    def _new_api(self):
+        self.api_combo.set("自定义")
         self.api_url_var.set("")
         self.api_url_entry.config(state="normal")
         self.api_url_entry.focus_set()
         self.save_api_btn.config(state="normal")
         self.del_api_btn.config(state="disabled")
 
-    def _save_current_api(self):
-        # 【修改】获取用户输入的基础地址
-        base_url = self.api_url_var.get().strip().rstrip('/')
-        if not base_url.startswith("http"):
-            messagebox.showerror("错误", "API 地址必须以 http:// 或 https:// 开头")
-            return
-
-        # 不再需要复杂的推导，直接用 base_url
+    def _save_api(self):
+        u = self.api_url_var.get().strip().rstrip('/')
+        if not u.startswith("http"): return messagebox.showerror("错误", "API 格式错误")
         try:
-            # 简单提取域名作为名称的一部分
-            domain = base_url.split('//')[1].split('/')[0]
-            new_api = {
-                "name": f"自定义 ({domain})",
-                "base_url": base_url
-                # 其他字段由 config_mgr 动态生成，这里只存基础信息
-            }
-        except Exception:
-            messagebox.showerror("错误", "API 地址格式不正确。")
-            return
+            d = u.split('//')[1].split('/')[0]
+            l = config_mgr.get_api_list()
+            l.append({"name": f"自定义 ({d})", "base_url": u})
+            config_mgr.set_api_list(l)
+            self.api_combo['values'] = [x['name'] for x in l]
+            self.api_combo.current(len(l) - 1)
+            self._on_api_selected()
+            config_mgr.save()
+        except:
+            messagebox.showerror("错误", "URL 无效")
 
-        api_list = config_mgr.get_api_list()
-        api_list.append(new_api)
-        config_mgr.set_api_list(api_list)
-        self.api_combo['values'] = [api['name'] for api in api_list]
-        self.api_combo.current(len(api_list) - 1)
-        self._on_api_selected()
-        config_mgr.save()
-
-    def _delete_current_api(self):
+    def _del_api(self):
         idx = self.api_combo.current()
         if idx == 0: return
-        api_list = config_mgr.get_api_list()
-        if 0 <= idx < len(api_list):
-            if messagebox.askyesno("确认", f"确定要删除 API: {api_list[idx]['name']} 吗？"):
-                api_list.pop(idx)
-                config_mgr.set_api_list(api_list)
-                self.api_combo['values'] = [api['name'] for api in api_list]
-                self.api_combo.current(0)
-                self._on_api_selected()
-                config_mgr.save()
+        if messagebox.askyesno("删除", "确定删除？"):
+            l = config_mgr.get_api_list()
+            l.pop(idx)
+            config_mgr.set_api_list(l)
+            self.api_combo['values'] = [x['name'] for x in l]
+            self.api_combo.current(0)
+            self._on_api_selected()
+            config_mgr.save()
 
-    # --- 登录与保存逻辑 ---
-    def _start_login_thread(self):
-        # 1. 获取并保存 Java 路径选择
-        if not self.is_relogin or self.force_show_settings:
-            # 从Combobox的当前选中项获取真实路径，因为显示值可能带后缀
-            current_idx = self.java_combo.current()
+    def _on_verify(self):
+        email = self.email_combo.get().strip()
+        pwd = self.pwd_entry.get().strip()
+        if not email or not pwd: return messagebox.showwarning("提示", "请输入账号密码")
+        cfg = config_mgr.get_current_api_config()
+        if not cfg.get("base_url"): return
+        self.verify_btn.config(state="disabled", text="验证中...")
+        self.profile_combo.set("验证中...")
+        threading.Thread(target=self._do_verify, args=(email, pwd, f"{cfg['base_url']}/authserver/authenticate"),
+                         daemon=True).start()
 
-            if current_idx >= 0 and hasattr(self, 'java_combo_real_values'):
-                real_java = self.java_combo_real_values[current_idx]
-            else:
-                # 用户手动输入的路径
-                real_java = self.java_path_var.get()
+    def _do_verify(self, e, p, u):
+        try:
+            d = authAPI.authenticate(u, e, p)
+            self.window.after(0, lambda: self._ver_ok(d, e))
+        except Exception as x:
+            self.window.after(0, lambda: self._ver_fail(x))
 
-            # 允许为空，为空则在启动时自动选择
-            if real_java and not os.path.exists(real_java):
-                messagebox.showerror("错误", "所选的 Java 路径不存在，请检查。")
-                return
-            config_mgr.set_real_java_path(real_java)
-            config_mgr.set_enable_embedded_java(self.enable_embedded_var.get())
+    def _ver_ok(self, data, email):
+        self.verify_btn.config(state="normal", text="✔ 验证成功")
+        self.temp_auth_data = data
+        self.temp_available_profiles = data.get("availableProfiles", [])
+        if hasattr(config_mgr, 'add_history_user'):
+            config_mgr.add_history_user(email)
+            self.email_combo['values'] = config_mgr.get_history_users()
 
-        # 2. 获取并保存伪装版本号
-        spoof_ver = self.spoof_version_var.get().strip()
-        if spoof_ver:
-            config_mgr.set_spoof_version(spoof_ver)
+        if not self.temp_available_profiles:
+            self.profile_combo.set("无角色")
+            return messagebox.showerror("失败", "无游戏角色")
+
+        names = [x["name"] for x in self.temp_available_profiles]
+        self.profile_combo['values'] = names
+        self.profile_combo.config(state="readonly")
+        sel = data.get("selectedProfile")
+        if sel:
+            for i, prof in enumerate(self.temp_available_profiles):
+                if prof["id"] == sel["id"]:
+                    self.profile_combo.current(i)
+                    break
         else:
-            # 如果用户清空了，恢复默认
-            config_mgr.set_spoof_version(constants.DEFAULT_SPOOF_VERSION)
+            self.profile_combo.current(0)
 
-        # 3. 如果只是强制设置且不是重新登录，保存配置后直接退出
-        if self.force_show_settings and not self.is_relogin:
+    def _ver_fail(self, e):
+        self.verify_btn.config(state="normal", text="验证账号")
+        self.profile_combo.set("验证失败")
+        msg = str(e)
+        if isinstance(e, requests.exceptions.HTTPError):
             try:
-                config_mgr.save()
-                self.setup_success = True
-                self.window.destroy()
-            except Exception as e:
-                messagebox.showerror("错误", f"保存配置失败: {e}")
+                msg = e.response.json().get("errorMessage", msg)
+            except:
+                pass
+        messagebox.showerror("验证失败", msg)
+
+    def _on_launch(self):
+        path = self.java_path_var.get()
+        if not path: return messagebox.showerror("错误", "请设置 Java")
+        config_mgr.set_real_java_path(path)
+
+        sp = self.spoof_var.get().strip()
+        config_mgr.set_spoof_version(sp if sp else constants.DEFAULT_SPOOF_VERSION)
+
+        if self.force_show_settings:
+            config_mgr.save()
+            self.setup_success = True
+            self.window.destroy()
             return
 
-        # 4. 执行登录验证
-        email = self.email_entry.get()
-        pwd = self.pwd_entry.get()
-        if not email or not pwd:
-            messagebox.showerror("错误", "请输入账号和密码。")
-            return
+        if self.temp_auth_data:
+            idx = self.profile_combo.current()
+            if idx < 0: return messagebox.showerror("错误", "请选择角色")
+            prof = self.temp_available_profiles[idx]
+            payload = {
+                "accessToken": self.temp_auth_data["accessToken"],
+                "uuid": prof["id"],
+                "name": prof["name"]
+            }
+            if self.temp_auth_data.get("clientToken"):
+                payload["clientToken"] = self.temp_auth_data.get("clientToken")
+            config_mgr.set_auth_data(payload)
+        elif not config_mgr.get_auth_data():
+            return messagebox.showerror("错误", "请先验证账号")
 
-        current_api = config_mgr.get_current_api_config()
-        base_url = current_api.get("base_url")
-        if not base_url:
-            messagebox.showerror("错误", "无效的 API 配置：缺少基础地址。")
-            return
-
-        full_auth_url = f"{base_url}/authserver/authenticate"
-
-        self._set_ui_state("disabled")
-        self.login_btn.config(text="正在登录...")
-
-        threading.Thread(target=self._login_task, args=(email, pwd, full_auth_url), daemon=True).start()
-
-    def _login_task(self, email, pwd, auth_url):
         try:
-            data = authAPI.authenticate(auth_url, email, pwd)
-            self.window.after(0, lambda: self._on_login_success(data))
-        except Exception as e:
-            self.window.after(0, lambda: self._on_login_error(e))
-
-    def _on_login_success(self, data):
-        try:
-            # 保存认证数据
-            config_mgr.set_auth_data({
-                "accessToken": data["accessToken"],
-                "clientToken": data["clientToken"],
-                "uuid": data["selectedProfile"]["id"],
-                "name": data["selectedProfile"]["name"]
-            })
-            # 统一保存所有配置（Java路径、伪装版本、认证数据）
             config_mgr.save()
             self.setup_success = True
             self.window.destroy()
         except Exception as e:
-            self._on_login_error(f"保存配置失败: {e}")
-
-    def _on_login_error(self, e):
-        self._set_ui_state("normal")
-        btn_text = "保存设置" if (self.force_show_settings and not self.is_relogin) else "登录并保存"
-        self.login_btn.config(text=btn_text)
-
-        err_msg = str(e)
-        if isinstance(e, requests.exceptions.HTTPError):
-            try:
-                err_msg = e.response.json().get("errorMessage", err_msg)
-            except:
-                pass
-        messagebox.showerror("登录失败", f"验证失败:\n{err_msg}")
-
-    def _set_ui_state(self, state):
-        self.email_entry.config(state=state)
-        self.pwd_entry.config(state=state)
-        self.api_combo.config(state=state)
-        self.new_api_btn.config(state=state)
-        # Java选择和高级设置在登录中也禁用，防止状态不一致
-        self.java_combo.config(state=state)
-
-    def _center_window(self):
-        self.window.update_idletasks()
-        width = self.window.winfo_width()
-        height = self.window.winfo_height()
-        # 确保高度不超过屏幕
-        screen_height = self.window.winfo_screenheight()
-        if height > screen_height * 0.9:
-            height = int(screen_height * 0.9)
-            self.window.geometry(f'{width}x{height}')
-
-        x = (self.window.winfo_screenwidth() // 2) - (width // 2)
-        y = (self.window.winfo_screenheight() // 2) - (height // 2)
-        self.window.geometry('{}x{}+{}+{}'.format(width, height, x, y))
+            messagebox.showerror("错误", f"保存失败: {e}")
 
     def run(self):
         self.window.mainloop()
@@ -492,5 +384,5 @@ class LoginWizard:
 
 
 def show_wizard(is_relogin=False, force_show_settings=False):
-    wizard = LoginWizard(is_relogin, force_show_settings)
-    return wizard.run()
+    # is_relogin 参数虽然保留了接口，但在内部已经不产生逻辑影响
+    return LoginWizard(force_show_settings=force_show_settings).run()

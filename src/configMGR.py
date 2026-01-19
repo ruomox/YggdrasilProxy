@@ -177,5 +177,18 @@ class ConfigManager:
 
         return api_config
 
+    def get_history_users(self):
+        return self._config_data.get("history_users", [])
+
+    def add_history_user(self, username):
+        """添加一个账号到历史记录，如果已存在则移到最前"""
+        if not username: return
+        history = self.get_history_users()
+        if username in history:
+            history.remove(username)
+        history.insert(0, username)
+        # 限制保存最近 5 个
+        self._config_data["history_users"] = history[:5]
+
 
 config_mgr = ConfigManager()  # 导出单例实例

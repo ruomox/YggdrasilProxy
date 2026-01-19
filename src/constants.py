@@ -3,8 +3,7 @@
 # 程序基础信息
 PROXY_NAME = "YggdrasilProxy"
 PROXY_VERSION = "1.0.0"
-CONFIG_VERSION = 3
-APP_INFO = {"name": PROXY_NAME, "version": CONFIG_VERSION}
+CONFIG_VERSION = 1
 
 # Yggdrasil 协议标准常量
 AUTH_AGENT = {
@@ -22,7 +21,7 @@ JRE_DIR_NAME = "YggProJRE"
 INJECTOR_FILENAME = "authlib-injector.jar"
 
 # 强制显示设置界面的参数集合
-SETTINGS_ARGS = {"--yggdrasilproxysettings", "--yggdrasillogin"}
+SETTINGS_ARGS = {"--yggproconfig"}
 
 # Minecraft 主类名标识
 MC_MAIN_CLASS = "net.minecraft.client.main.Main"
