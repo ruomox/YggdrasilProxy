@@ -467,22 +467,60 @@ class LoginWizard:
     # --- 启动 ---
 
     def _on_launch(self):
-        # 1. 保存设置
+        # 1. 验证 Java
         path = self.java_path_var.get()
         if not path: return messagebox.showerror("错误", "请选择 Java")
         config_mgr.set_real_java_path(path)
 
-        sp = self.spoof_var.get()
-        config_mgr.set_spoof_version(sp)
+        sp = self.spoof_var.get().strip()
+        config_mgr.set_spoof_version(sp if sp else constants.DEFAULT_SPOOF_VERSION)
 
         if not self.current_auth_data:
             return messagebox.showerror("错误", "请选择一个账号")
 
-        # 设置当前选中账号为“默认”，以便 Main.py 在 GUI 关闭后能获取到它进行绑定
+        # 2. 【核心修复】执行角色绑定 (Profile Binding)
+        # 我们手里的 Token 可能是“无主”的，必须通过 Refresh + SelectedProfile 把它变成“有主”的
+        # 只有“有主”的 Token 才能通过 validate
+
+        api = config_mgr.get_current_api_config()
+        base_url = api.get("base_url", "").rstrip('/')
+
+        # 构造 Profile 对象
+        target_profile = {
+            "id": self.current_auth_data["uuid"],
+            "name": self.current_auth_data["name"]
+        }
+
+        try:
+            # 尝试绑定 (Refresh with Profile)
+            # 注意：即便 Token 已经是绑定的，再次绑定通常也是安全的（刷新有效期）
+            print(f"Binding token to profile: {target_profile['name']}")
+
+            new_data = authAPI.refresh(
+                f"{base_url}/authserver/refresh",
+                self.current_auth_data["accessToken"],
+                self.current_auth_data.get("clientToken"),
+                selected_profile=target_profile
+            )
+
+            # 更新内存中的数据为“已绑定”的新 Token
+            self.current_auth_data["accessToken"] = new_data["accessToken"]
+            # clientToken 通常不变，但以防万一
+            if "clientToken" in new_data:
+                self.current_auth_data["clientToken"] = new_data["clientToken"]
+
+            # 保存到 Config
+            config_mgr.add_or_update_account(self.current_auth_data)
+
+        except Exception as e:
+            # 如果绑定失败，可能是网络问题，也可能是 Token 彻底过期
+            # 这里我们提示错误，不强行关闭，让用户决定是否重试登录
+            return messagebox.showerror("绑定角色失败", f"无法绑定角色，请尝试重新登录。\n{e}")
+
+        # 3. 设置默认并退出
         config_mgr._config_data["default_account_uuid"] = self.current_auth_data["uuid"]
         config_mgr.save()
 
-        # 2. 返回成功
         self.setup_success = True
         self.window.destroy()
 
