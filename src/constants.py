@@ -33,3 +33,28 @@ DEFAULT_API_LIST = [
         "base_url": "https://littleskin.cn/api/yggdrasil",
     }
 ]
+
+# =========================================================================
+# 【特征定义库】(用于识别游戏启动)
+# =========================================================================
+
+# 1. 已知的 Wrapper 类 (陷阱模式)
+# 遇到这些类时，启用 Classpath Shadowing 策略
+KNOWN_WRAPPERS = [
+    "org.prismlauncher.EntryPoint",
+    "org.multimc.EntryPoint",
+]
+
+# 2. 已知的游戏主类 (标准模式)
+# 遇到这些类或 @argfile 时，启用标准嗅探策略
+KNOWN_GAME_MAINS = [
+    "net.minecraft.client.main.Main",
+    "net.fabricmc.loader",
+    "cpw.mods.bootstraplauncher",
+    "cpw.mods.fml",
+    "net.minecraft.launchwrapper.Launch",
+    "net.neoforged"
+]
+
+# 最终要调用的真实游戏主类 (用于替换 Wrapper)
+REAL_MINECRAFT_MAIN = "net.minecraft.client.main.Main"
