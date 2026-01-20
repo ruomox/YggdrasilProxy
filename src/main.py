@@ -1,321 +1,287 @@
-# src/main.py
 import sys
 import os
 import subprocess
 import platform
 import re
-from src import constants, javaScanner, authAPI, guiWizard, runtimeMGR
+from src import constants, runtimeMGR, authAPI, guiWizard, javaScanner
 from src.configMGR import config_mgr
 
 
-# ==============================================================================
-# 辅助函数
-# ==============================================================================
-def ensure_session_valid(force_settings=False):
-    """确保会话有效，处理刷新、重新登录"""
-    config_mgr.load()
-    auth_data = config_mgr.get_auth_data()
-    current_api = config_mgr.get_current_api_config()
-    base_url = current_api.get("base_url")
+# ================= 1. 工具方法 =================
 
-    # 1. 无凭据 -> 登录
-    if not auth_data:
-        print(f"[{constants.PROXY_NAME}] 需要验证账号...", file=sys.stderr)
-        if not guiWizard.show_wizard(force_show_settings=False):
-            sys.exit(1)
-        config_mgr.load()
-        return
+def run_sniffer(tool_java, original_args):
+    """
+    使用【内嵌Java】运行 fMcMain 来清洗和规范化参数。
+    """
+    # 【修改点】：调用 get_fmcmain_jar 自动释放文件
+    fmcmain_jar = runtimeMGR.get_fmcmain_jar()
 
-    # 2. 有凭据 -> 验证
-    access_token = auth_data.get("accessToken")
-    client_token = auth_data.get("clientToken")
+    # 双重检查
+    if not os.path.exists(fmcmain_jar):
+        print(f"[{constants.PROXY_NAME}] 致命错误: 无法释放/找到 fMcMain.jar", file=sys.stderr)
+        return None
 
-    # 简单验证
-    if authAPI.validate(f"{base_url}/authserver/validate", access_token, client_token):
-        return
+    # 构造命令： <EmbeddedJava> -jar <fMcMain.jar> [原始参数...]
+    # cmd = [tool_java, "-jar", fmcmain_jar] + original_args
+    cmd = [
+              tool_java,
+              "-cp", fmcmain_jar,
+              "net.minecraft.client.main.Main"
+          ] + original_args
 
-    # 3. 验证失败 -> 刷新
-    print(f"[{constants.PROXY_NAME}] Token 失效，尝试刷新...", file=sys.stderr)
     try:
-        data = authAPI.refresh(f"{base_url}/authserver/refresh", access_token, client_token)
-        auth_data["accessToken"] = data["accessToken"]
-        if "clientToken" in data: auth_data["clientToken"] = data["clientToken"]
-        config_mgr.set_auth_data(auth_data)
-        config_mgr.save()
-        return
-    except:
-        pass
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            errors='replace'
+        )
+        return proc.stdout + proc.stderr
+    except Exception as e:
+        print(f"[{constants.PROXY_NAME}] 参数嗅探器运行失败: {e}", file=sys.stderr)
+        return None
 
-    # 4. 刷新失败 -> 重新登录
-    print(f"[{constants.PROXY_NAME}] 凭证过期，请重新登录。", file=sys.stderr)
-    if not guiWizard.show_wizard(force_show_settings=False):
-        sys.exit(1)
+
+def parse_sniffer_output(output):
+    """解析 fMcMain 的标准输出"""
+    args_list = []
+    is_capturing = False
+
+    if not output: return []
+
+    for line in output.splitlines():
+        line = line.strip()
+        # 匹配 Java 端定义的标记
+        if "---YGGPROXY_SNIFFER_START---" in line:
+            is_capturing = True
+            continue
+        if "---YGGPROXY_SNIFFER_END---" in line:
+            is_capturing = False
+            break
+        if is_capturing:
+            args_list.append(line)
+
+    return args_list
+
+
+def get_game_dir(args):
+    """从清洗后的参数中提取 gameDir"""
+    for i, arg in enumerate(args):
+        if arg == "--gameDir" and i + 1 < len(args):
+            return args[i + 1]
+        if arg.startswith("--gameDir="):
+            return arg.split("=", 1)[1]
+    return None
+
+
+def ensure_account_valid(game_dir):
+    """
+    账号验证核心流程：
+    1. 检查绑定
+    2. 如果无绑定或 Token 失效 -> 弹出 GUI
+    3. 如果 Token 过期 -> 自动刷新 -> 失败则弹出 GUI
+    """
     config_mgr.load()
 
+    # 1. 获取目标账号 UUID (绑定 > 默认)
+    target_uuid = config_mgr.get_account_for_instance(game_dir)
+    auth_data = config_mgr.get_account(target_uuid)
+
+    # 2. 【关键拦截点】如果没有账号，强制弹出 GUI
+    if not auth_data:
+        print(f"[{constants.PROXY_NAME}] 当前实例未配置账号，正在唤起登录界面...", file=sys.stderr)
+
+        # 弹出向导 (阻塞直到用户关闭窗口)
+        guiWizard.show_wizard()
+        config_mgr.load()  # 重新加载，读取 GUI 保存的数据
+
+        # 再次尝试获取 (GUI 逻辑会把新登录的账号设为默认)
+        target_uuid = config_mgr.get_account_for_instance(None)
+        auth_data = config_mgr.get_account(target_uuid)
+
+        # 如果获取到了，自动绑定到当前 gameDir
+        if auth_data:
+            config_mgr.set_instance_binding(game_dir, target_uuid)
+
+    # 如果弹窗后还是没账号（用户直接关掉了窗口），返回 None，后续会终止启动
+    if not auth_data:
+        return None
+
+    # 3. 验证 Token 有效性
+    current_api = config_mgr.get_current_api_config()
+    base_url = current_api.get("base_url", "").rstrip('/')
+
+    validate_url = f"{base_url}/authserver/validate"
+    refresh_url = f"{base_url}/authserver/refresh"
+
+    is_valid = False
+    try:
+        is_valid = authAPI.validate(validate_url, auth_data["accessToken"], auth_data.get("clientToken"))
+    except:
+        is_valid = False
+
+    if not is_valid:
+        print(f"[{constants.PROXY_NAME}] Token 已过期，尝试自动刷新...", file=sys.stderr)
+        try:
+            new_tokens = authAPI.refresh(refresh_url, auth_data["accessToken"], auth_data.get("clientToken"))
+            auth_data["accessToken"] = new_tokens["accessToken"]
+            if "clientToken" in new_tokens:
+                auth_data["clientToken"] = new_tokens["clientToken"]
+            config_mgr.add_or_update_account(auth_data)
+        except Exception as e:
+            print(f"[{constants.PROXY_NAME}] 自动刷新失败: {e}", file=sys.stderr)
+            # 刷新失败，再次强制弹窗
+            print(f"[{constants.PROXY_NAME}] 需要重新登录...", file=sys.stderr)
+            guiWizard.show_wizard()
+            config_mgr.load()
+
+            # 重新获取
+            target_uuid = config_mgr.get_account_for_instance(None)
+            auth_data = config_mgr.get_account(target_uuid)
+
+    return auth_data
+
+
+# ================= 2. 主入口 =================
 
 def main():
-    args = sys.argv[1:]
+    raw_args = sys.argv[1:]
 
-    # ========================== 1. 意图判断 ==========================
-    is_launching_game = False
-    if any(arg == "--accessToken" for arg in args):
-        is_launching_game = True
-    elif any(constants.MC_MAIN_CLASS in arg for arg in args):
-        is_launching_game = True
-    elif len(args) > 4 and any(arg.endswith(".jar") for arg in args):
-        is_launching_game = True
-
-    is_version_check = any(arg.strip().lower() in ['-version', '--version'] for arg in args)
-    is_forcing_settings = any(arg.lower() in constants.SETTINGS_ARGS for arg in args)
-
-    is_maintenance_mode = not is_launching_game and not is_forcing_settings
-
-    # ========================== 2. 寻找 Actor Java (保留之前的解压修复) ==========================
-    config_mgr.load()
-
-    # 【修改点 1】只调用一次强制解压，并保存结果
-    # 这一步现在是强制的：清理旧文件 -> 解压新文件
-    embedded_java = runtimeMGR.get_fallback_java()
-
-    actor_java = config_mgr.get_real_java_path()
-
-    # 策略 A: 优先扫系统 (如果配置里没有指定)
-    if not actor_java or not os.path.exists(actor_java):
-        candidates = javaScanner.find_java_candidates()
-        if candidates:
-            actor_java = candidates[0]
-        else:
-            actor_java = None
-
-    # 【修改点 2】删除这里的重复调用
-    # 这里的 runtimeMGR.get_fallback_java() 删掉，因为上面已经做过了
-
-    # 策略 B: 系统无 -> 使用刚才解压好的内嵌 Java
-    if not actor_java:
-        # 【修改点 3】直接使用变量 embedded_java，不再调用函数
-        if embedded_java and os.path.exists(embedded_java):
-            actor_java = embedded_java
-
-    # ========================== 3. 分支一：维护/欺骗模式 ==========================
-    if is_maintenance_mode:
-        if is_version_check:
-            spoof_ver = config_mgr.get_spoof_version()
-            if not spoof_ver: sys.exit(subprocess.call([actor_java] + args))
-            try:
-                proc = subprocess.run([actor_java] + args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                                      errors='replace')
-                pattern = re.compile(r'version\s+"(\d+(\.\d+)*(_\d+)?(-\w+)?)"')
-                modified_stderr = proc.stderr
-                match = pattern.search(modified_stderr)
-                if match:
-                    real_ver = match.group(1)
-                    if real_ver != spoof_ver:
-                        modified_stderr = modified_stderr.replace(f'version "{real_ver}"', f'version "{spoof_ver}"')
-                        modified_stderr = modified_stderr.replace(f'build {real_ver.split(".")[0]}',
-                                                                  f'build {spoof_ver.split(".")[0]}')
-                print(modified_stderr, file=sys.stderr, end='')
-                if proc.stdout: print(proc.stdout, file=sys.stdout, end='')
-                sys.exit(proc.returncode)
-            except:
-                sys.exit(subprocess.call([actor_java] + args))
-        else:
-            sys.exit(subprocess.call([actor_java] + args))
-
-    # ========================== 4. 分支二：启动游戏模式 ==========================
-
-    # --- 加载配置 ---
-    config_mgr.load()
-
-    print("=" * 50, file=sys.stderr)
-    print(f"[{constants.PROXY_NAME} v{constants.PROXY_VERSION}] 介入...", file=sys.stderr)
-
-    # --- 核心业务：确保会话有效 ---
-    # 如果是强制设置模式，且不启动游戏，在 ensure_session_valid 内部的弹窗关闭后直接退出
-    # 但为了逻辑严密，我们在这里处理纯设置逻辑
-    if is_forcing_settings and not is_launching_game:
+    # --- A. 额外功能：双击直接打开设置 ---
+    if len(raw_args) == 0:
         guiWizard.show_wizard(force_show_settings=True)
-        print(f"[{constants.PROXY_NAME}] 设置完成。", file=sys.stderr)
         sys.exit(0)
 
-    # 1. 确保有 Real Java
-    real_java = config_mgr.get_real_java_path()
-    if not real_java or not os.path.exists(real_java):
-        # 优先尝试系统扫描，避免强制弹窗影响“无 Java 机器”的自动兜底体验
-        candidates = javaScanner.find_java_candidates()
-        if candidates:
-            real_java = candidates[0]
-            config_mgr.set_real_java_path(real_java)
-            config_mgr.save()
-        else:
-            # 系统仍无 Java：使用内嵌作为兜底“真实 Java”
-            if embedded_java and os.path.exists(embedded_java):
-                real_java = embedded_java
-            else:
-                print(f"[{constants.PROXY_NAME}] 请配置 Java 环境...", file=sys.stderr)
-                if not guiWizard.show_wizard(force_show_settings=True): sys.exit(1)
-                config_mgr.load()
-                real_java = config_mgr.get_real_java_path()
+    # 初始化
+    config_mgr.load()
 
-    # 2. 确保 Token 有效
-    ensure_session_valid(force_settings=is_forcing_settings)
+    # --- B. 准备运行时环境 ---
 
-    # 3. 获取启动信息
-    auth_data = config_mgr.get_auth_data()
-    current_api = config_mgr.get_current_api_config()
-    injector_path = runtimeMGR.get_injector_jar()
-
-    if not auth_data or not real_java or not current_api or not injector_path:
-        print(f"[{constants.PROXY_NAME}] 严重错误：缺少必要信息，无法启动。", file=sys.stderr)
+    # 1. 获取 Tool Java (内嵌，用于嗅探和伪装)
+    tool_java = runtimeMGR.get_fallback_java()
+    if not tool_java or not os.path.exists(tool_java):
+        # 如果内嵌环境都坏了，必须报错，否则无法进行后续操作
+        # 注意：这里打印到 stderr，启动器会显示错误日志
+        print(f"[{constants.PROXY_NAME}] 致命错误: 无法加载内部 Java 环境。", file=sys.stderr)
+        print(f"[{constants.PROXY_NAME}] 请检查 .YggProxy 目录或重新安装。", file=sys.stderr)
         sys.exit(1)
 
-    # ==============================================================================
-    # 6. 参数精细化重组 (严格执行劈开参数逻辑)
-    # ==============================================================================
+    # 2. 获取 Target Java (用户系统 Java，用于跑游戏)
+    target_java = config_mgr.get_real_java_path()
+    if not target_java or not os.path.exists(target_java):
+        # 如果配置里没有，扫描一下
+        candidates = javaScanner.find_java_candidates()
+        if candidates:
+            target_java = candidates[0]
+            config_mgr.set_real_java_path(target_java)
+            config_mgr.save()
 
-    final_cmd = []
+    # 兜底：如果没有系统 Java，暂时用内嵌 Java 顶替 (虽然不建议跑大游戏)
+    if not target_java:
+        target_java = tool_java
 
-    # 检查是否存在主类，作为分界线
-    if constants.MC_MAIN_CLASS in args:
-        # === 经典模式 (Vanilla / OptiFine) ===
-        original_jvm_args = []
-        original_game_args = []
-        main_class_found = False
+    # --- C. 特殊参数处理 ---
 
-        for arg in args:
-            if arg == constants.MC_MAIN_CLASS:
-                main_class_found = True
-                continue  # 主类名稍后单独加
+    # 显式打开设置
+    if any(arg in constants.SETTINGS_ARGS for arg in raw_args):
+        guiWizard.show_wizard(force_show_settings=True)
+        sys.exit(0)
 
-            if not main_class_found:
-                # 主类名之前 -> JVM 参数
-                if arg not in constants.SETTINGS_ARGS:
-                    original_jvm_args.append(arg)
-            else:
-                # 主类名之后 -> 游戏参数
-                if arg not in constants.SETTINGS_ARGS:
-                    original_game_args.append(arg)
+    # 版本伪装 (-version)
+    if any(arg.strip().lower() in ['-version', '--version'] for arg in raw_args):
+        spoof_ver = config_mgr.get_spoof_version()
+        if spoof_ver:
+            # 开启伪装：用 Tool Java 获取输出并正则替换
+            try:
+                proc = subprocess.run([tool_java, "-version"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                      text=True)
+                # 替换第一行 version "xxx"
+                new_output = re.sub(r'version "[^"]+"', f'version "{spoof_ver}"', proc.stdout, count=1)
+                print(new_output, end='')  # 输出修改后的版本
+            except:
+                subprocess.call([tool_java, "-version"])
+        else:
+            # 关闭伪装：直接调用 Target Java
+            subprocess.call([target_java, "-version"])
+        sys.exit(0)
 
-        # --- A. 构造 JVM 参数 ---
-        final_jvm_args = []
-        final_jvm_args.extend(original_jvm_args)
+    # --- D. 参数嗅探 (核心拦截) ---
 
-        # 1. 注入 Authlib-Injector
-        final_jvm_args.append(f"-javaagent:{injector_path}={current_api['base_url']}")
+    sniffer_out = run_sniffer(tool_java, raw_args)
+    captured_args = parse_sniffer_output(sniffer_out)
 
-        # 2. 移除可能冲突的旧 Agent
-        final_jvm_args = [arg for arg in final_jvm_args if "authlib-injector" not in arg]
+    # 如果截获到的参数为空，说明 sniffing 失败，或者这不是一个标准的 MC 启动命令
+    if not captured_args:
+        # 此时要做个判断：如果原始参数里看起来像是启动游戏（包含 net.minecraft 或 -cp），那就是出错了
+        raw_str = " ".join(raw_args)
+        if "net.minecraft" in raw_str or "-cp" in raw_str or "-jar" in raw_str:
+            print(f"[{constants.PROXY_NAME}] 错误: 无法解析启动参数 (Sniffer Failed)。", file=sys.stderr)
+            print(f"[{constants.PROXY_NAME}] 请检查 fMcMain.jar 是否存在。", file=sys.stderr)
+            sys.exit(1)
 
-        # 3. 强制覆盖品牌 (JVM 属性)
-        final_jvm_args.append(f"-Dminecraft.launcher.brand={constants.PROXY_NAME}")
-        final_jvm_args.append(f"-Dminecraft.launcher.version={constants.PROXY_VERSION}")
+        # 否则可能只是启动器在做其他检测，直接透传
+        sys.exit(subprocess.call([target_java] + raw_args))
 
-        # --- B. 构造 游戏 参数 ---
-        final_game_args = []
+    # --- E. 业务处理 (GUI 介入点) ---
 
-        skip_next = False
-        sensitive_keys = ["--username", "--uuid", "--accessToken", "--userProperties", "--versionType"]
+    game_dir = get_game_dir(captured_args)
 
-        for arg in original_game_args:
-            if skip_next:
-                skip_next = False
-                continue
+    # 这里会检查账号，如果没有 -> 弹出 GUI
+    auth_data = ensure_account_valid(game_dir)
 
-            # 严格拦截旧参数 (空格格式)
-            if arg in sensitive_keys:
-                skip_next = True
-                continue
+    if not auth_data:
+        print(f"[{constants.PROXY_NAME}] 启动终止: 用户取消或未登录。", file=sys.stderr)
+        sys.exit(1)
 
-            # 严格拦截旧参数 (等号格式兼容，防止漏网)
-            is_assign = False
-            for k in sensitive_keys:
-                if arg.startswith(k + "="):
-                    is_assign = True
-                    break
-            if is_assign:
-                continue
+    # --- F. 构造最终命令 ---
 
-            final_game_args.append(arg)
+    injector_path = runtimeMGR.get_injector_jar()
+    api_config = config_mgr.get_current_api_config()
 
-        # 注入认证信息
-        final_game_args.extend(["--username", auth_data["name"]])
-        final_game_args.extend(["--uuid", auth_data["uuid"]])
-        final_game_args.extend(["--accessToken", auth_data["accessToken"]])
-        final_game_args.extend(["--userProperties", "{}"])
+    final_cmd = [target_java]
 
-        # 注入自定义显示版本
-        my_branding = f"{constants.PROXY_NAME} v{constants.PROXY_VERSION}"
-        final_game_args.extend(["--versionType", my_branding])
+    # 注入 authlib-injector
+    final_cmd.append(f"-javaagent:{injector_path}={api_config['base_url']}")
 
-        # 组装
-        final_cmd = [real_java] + final_jvm_args + [constants.MC_MAIN_CLASS] + final_game_args
+    # 过滤与重组参数
+    sensitive_keys = {"--username", "--uuid", "--accessToken", "--userProperties"}
+    skip_next = False
 
-    else:
-        # === 兼容模式 (Forge/Fabric) ===
-        # 找不到 MC_MAIN_CLASS，我们只能尽可能清洗，并按照 JVM在前 Game在后的原则注入
+    for arg in captured_args:
+        if skip_next:
+            skip_next = False
+            continue
 
-        # 1. 头部 JVM 注入
-        jvm_inject = [
-            f"-javaagent:{injector_path}={current_api['base_url']}",
-            f"-Dminecraft.launcher.brand={constants.PROXY_NAME}",
-            f"-Dminecraft.launcher.version={constants.PROXY_VERSION}"
-        ]
+        if arg in sensitive_keys:
+            skip_next = True
+            continue
+        if any(arg.startswith(k + "=") for k in sensitive_keys):
+            continue
 
-        # 2. 尾部 Game 注入
-        my_branding = f"{constants.PROXY_NAME} v{constants.PROXY_VERSION}"
-        game_inject = [
-            "--username", auth_data["name"],
-            "--uuid", auth_data["uuid"],
-            "--accessToken", auth_data["accessToken"],
-            "--userProperties", "{}",
-            "--versionType", my_branding
-        ]
+        # 移除旧的 authlib-injector agent (防止双重注入)
+        if "-javaagent:" in arg and "authlib-injector" in arg:
+            continue
 
-        # 3. 中间参数清洗
-        cleaned_args = []
-        skip_next = False
-        sensitive_keys = ["--username", "--uuid", "--accessToken", "--userProperties", "--versionType"]
+        final_cmd.append(arg)
 
-        for arg in args:
-            if skip_next:
-                skip_next = False
-                continue
+    # 追加我们的账号参数
+    final_cmd.extend([
+        "--username", auth_data["name"],
+        "--uuid", auth_data["uuid"],
+        "--accessToken", auth_data["accessToken"],
+        "--userProperties", "{}"
+    ])
 
-            # 过滤 Game 参数
-            if arg in sensitive_keys:
-                skip_next = True
-                continue
+    # --- G. 发射 ---
+    print(f"[{constants.PROXY_NAME}] 启动游戏: {auth_data['name']} (UUID: {auth_data['uuid']})", file=sys.stderr)
 
-            # 过滤 JVM Brand (如果启动器传了)
-            if arg.startswith("-Dminecraft.launcher.brand=") or arg.startswith("-Dminecraft.launcher.version="):
-                continue
-
-            # 过滤 Injector
-            if "authlib-injector" in arg:
-                continue
-
-            # 过滤设置参数
-            if arg in constants.SETTINGS_ARGS:
-                continue
-
-            cleaned_args.append(arg)
-
-        final_cmd = [real_java] + jvm_inject + cleaned_args + game_inject
-
-    print(f"[{constants.PROXY_NAME}] 启动参数重组完毕，转交控制权...", file=sys.stderr)
-    print("=" * 50, file=sys.stderr)
-
-    # 7. 最终执行
     try:
         if platform.system() == "Windows":
-            if not final_cmd[0].lower().endswith(".exe"):
-                final_cmd[0] += ".exe"
             sys.exit(subprocess.call(final_cmd))
         else:
-            os.execv(real_java, final_cmd)
-
-    except OSError as e:
-        err_msg = f"无法启动外部真实 JDK 进程:\n{real_java}\n\n错误信息: {e}"
-        print(f"[{constants.PROXY_NAME}] {err_msg}", file=sys.stderr)
+            os.execv(target_java, final_cmd)
+    except Exception as e:
+        print(f"[{constants.PROXY_NAME}] 启动异常: {e}", file=sys.stderr)
         sys.exit(1)
 
 

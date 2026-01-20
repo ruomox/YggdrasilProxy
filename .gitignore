@@ -1,6 +1,10 @@
 .idea
-assets
+assets/YggProJRE.zip
+assets/authlib-injector.jar
+AGENTS.md
+GEMINI.md
 build
 dist
 test
 *.spec
+net
