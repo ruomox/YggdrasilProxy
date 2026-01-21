@@ -118,7 +118,6 @@ class LoginWizard:
         self._ui_java_card()
         self._ui_api_card()
         self._ui_account_card()
-        self._ui_advanced_card()
         self._ui_footer()
 
     def _ui_header(self):
