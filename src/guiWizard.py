@@ -249,29 +249,42 @@ class ModernWizard(ctk.CTk):
         # 左侧“账户”是 pady=(25, 10)，这里设为 25 左右可以 visually aligned
         ctk.CTkFrame(self.main, height=25, fg_color="transparent").pack()
 
-        # --- 1. Java 环境板块 ---
+        # --- 1. Java 环境板块 (UI 重构) ---
         self._create_section_container("Java 运行环境")
 
         java_row = ctk.CTkFrame(self.current_section, fg_color="transparent")
         java_row.pack(fill="x", pady=(5, 0))
 
-        self.java_var = tkinter.StringVar(value=config_mgr.get_real_java_path() or "")
+        # 1. 下拉框 (显示精简信息)
+        self.java_map = {}  # 存储 "显示名" -> "详细信息Dict" 的映射
+        self.java_var = tkinter.StringVar(value="正在扫描...")
 
-        # Java 下拉框
         self.java_combo = ctk.CTkComboBox(
             java_row, variable=self.java_var, height=32,
-            values=["正在扫描..."]
+            command=self._on_java_change  # 绑定变更事件
         )
-        self.java_combo.pack(side="left", fill="x", expand=True)  # expand=True 占满剩余
+        self.java_combo.pack(side="left", fill="x", expand=True)
 
-        # 占位符 (间距)
+        # 间距
         ctk.CTkFrame(java_row, width=10, height=1, fg_color="transparent").pack(side="left")
 
-        # 浏览按钮 (固定宽度 80，与下方的 +/- 组合对齐)
+        # 2. 按钮容器 (总宽 80 = 35 + 10 + 35)
+        # [+] 浏览按钮
         ctk.CTkButton(
-            java_row, text="浏览", width=80, height=32,
+            java_row, text="+", width=35, height=32,
             fg_color=COLOR_BTN_GRAY, hover_color=COLOR_BTN_GRAY_HOVER,
+            font=("Arial", 16),
             command=self._browse_java
+        ).pack(side="left")
+
+        ctk.CTkFrame(java_row, width=10, height=1, fg_color="transparent").pack(side="left")
+
+        # [?] 详情按钮
+        ctk.CTkButton(
+            java_row, text="?", width=35, height=32,
+            fg_color=COLOR_BTN_GRAY, hover_color=COLOR_BTN_GRAY_HOVER,
+            font=("Arial", 14, "bold"),
+            command=self._show_java_details
         ).pack(side="left")
 
         # --- 2. 认证服务器板块 ---
@@ -534,22 +547,98 @@ class ModernWizard(ctk.CTk):
         messagebox.showerror("验证失败", str(e))
 
     # --- Java ---
-    def _on_java_scan_finished(self, paths):
+    def _on_java_scan_finished(self, infos):
         if not self.winfo_exists(): return
-        curr = config_mgr.get_real_java_path()
-        if curr and curr not in paths: paths.insert(0, curr)
 
-        self.java_combo.configure(values=paths)
-        if curr:
-            self.java_combo.set(curr)
-        elif paths:
-            self.java_combo.set(paths[0])
+        self.java_map = {}
+        display_list = []  # 下拉框列表 (存长名字)
+
+        current_path = config_mgr.get_real_java_path()
+        target_display = None
+
+        for info in infos:
+            path = info["path"]
+            # 【修改点】构造长名字：版本 (架构) - 路径
+            long_display = f"Java {info['version']} ({info['arch']}) - {path}"
+
+            self.java_map[long_display] = info
+            display_list.append(long_display)
+
+            if current_path and os.path.normpath(path) == os.path.normpath(current_path):
+                target_display = long_display
+
+        # 处理当前 Config 中的路径
+        if current_path and not target_display:
+            manual_info = javaScanner.get_java_info(current_path)
+            if not manual_info:
+                manual_info = {"path": current_path, "version": "?", "arch": "?"}
+
+            long_display = f"Java {manual_info['version']} ({manual_info['arch']}) - {current_path}"
+            self.java_map[long_display] = manual_info
+            display_list.insert(0, long_display)
+            target_display = long_display
+
+        # 更新 UI
+        if display_list:
+            self.java_combo.configure(values=display_list)
+            # 如果有目标，选中它；否则选中第一个
+            # 注意：这里调用 _on_java_change 会自动把长名字截断为短名字显示
+            self._on_java_change(target_display if target_display else display_list[0])
+        else:
+            self.java_combo.set("未找到 Java")
+
+    def _on_java_change(self, long_display_name):
+        """
+        用户点击下拉项时触发。
+        入参是下拉列表里的长字符串: "Java 17 (x64) - /path/to/java"
+        """
+        info = self.java_map.get(long_display_name)
+
+        if info:
+            # 1. 保存真实路径和信息对象 (供启动和详情页使用)
+            self.selected_java_path = info["path"]
+            self.current_java_info = info  # 缓存信息对象给 ? 按钮用
+
+            # 2. 【核心】将显示文本篡改为短格式 (不含路径)
+            short_display = f"Java {info['version']} ({info['arch']})"
+            self.java_combo.set(short_display)
+        else:
+            # 异常情况兜底
+            self.selected_java_path = long_display_name
 
     def _browse_java(self):
         f = tkinter.filedialog.askopenfilename(filetypes=[("Java Executable", "*.exe;java")])
         if f:
-            self.java_var.set(f)
-            self.java_combo.set(f)
+            info = javaScanner.get_java_info(f)
+            if info:
+                # 构造长名字
+                long_display = f"Java {info['version']} ({info['arch']}) - {f}"
+                self.java_map[long_display] = info
+
+                # 更新列表
+                vals = self.java_combo.cget("values")
+                if not vals: vals = []
+                if long_display not in vals: vals.insert(0, long_display)
+                self.java_combo.configure(values=vals)
+
+                # 触发选中逻辑 (会自动变短)
+                self._on_java_change(long_display)
+            else:
+                messagebox.showerror("错误", "无效的 Java 可执行文件")
+
+    def _show_java_details(self):
+        # 优先使用 _on_java_change 里缓存的 info 对象
+        # 因为现在输入框里是短名字，无法直接去 map 里查了
+        info = getattr(self, "current_java_info", None)
+
+        if not info:
+            return messagebox.showinfo("详情", "请先选择一个有效的 Java 环境")
+
+        msg = f"版本: {info.get('version')}\n" \
+              f"架构: {info.get('arch')}\n" \
+              f"路径: {info.get('path')}\n\n" \
+              f"原始输出:\n{info.get('raw_info')}"
+        messagebox.showinfo("Java 详情", msg)
 
     # --- 启动 ---
     def _on_launch(self):
@@ -559,10 +648,19 @@ class ModernWizard(ctk.CTk):
         if not self.current_auth_data:
             return messagebox.showwarning("提示", "请先选择一个账号")
 
-        j = self.java_var.get()
-        if not j: return messagebox.showwarning("提示", "Java 路径为空")
-        config_mgr.set_real_java_path(j)
+        # 【核心修复】直接使用内存中保存的真实路径
+        # 因为现在输入框里显示的是 "Java 17 (x64)" 这种短名字，不能直接用来启动
+        final_path = getattr(self, "selected_java_path", None)
 
+        # 兜底：如果还没触发过选择事件，尝试用 config 里的
+        if not final_path:
+            final_path = config_mgr.get_real_java_path()
+
+        if not final_path: return messagebox.showwarning("提示", "Java 路径为空")
+
+        config_mgr.set_real_java_path(final_path)
+
+        # 4. Token 刷新逻辑 (保持不变)
         api = config_mgr.get_current_api_config()
 
         try:
