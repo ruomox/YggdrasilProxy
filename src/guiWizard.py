@@ -1,510 +1,470 @@
 # src/guiWizard.py
 import sys
 import os
-import platform
 import threading
-import tkinter as tk
-from tkinter import messagebox, filedialog, ttk
-import requests
+import tkinter
+import customtkinter as ctk
+from PIL import Image
+from tkinter import messagebox
 
 from src import constants, authAPI, javaScanner
 from src.configMGR import config_mgr
 
-# ================= 1. 样式与常量定义 =================
-SYSTEM = platform.system()
-FONT_FAMILY = "Microsoft YaHei UI" if SYSTEM == "Windows" else "PingFang SC"
-if SYSTEM == "Linux": FONT_FAMILY = "DejaVu Sans"
+# ================= 1. 外观配置 =================
+ctk.set_appearance_mode("Dark")
+ctk.set_default_color_theme("dark-blue")
 
-# 暗色主题色板
-COLOR_BG = "#1E1E1E"
-COLOR_PANEL = "#252526"
-COLOR_BORDER = "#3E3E42"
-COLOR_TEXT = "#CCCCCC"
-COLOR_TEXT_DIM = "#858585"
-COLOR_ACCENT = "#007ACC"
-COLOR_ACCENT_HOVER = "#0098FF"
-COLOR_INPUT_BG = "#3C3C3C"
-COLOR_SUCCESS = "#4EC9B0"
-COLOR_DANGER = "#F44336"  # 删除按钮红色
+# 配色方案
+COLOR_SIDEBAR = "#2b2b2b"  # 左侧深色背景
+COLOR_MAIN = "#363636"  # 右侧背景
+COLOR_CARD_HOVER = "#3e3e3e"  # 列表项悬停
+COLOR_CARD_SELECT = "#4a4a4a"  # 列表项选中
+COLOR_ACCENT = "#E09F5E"  # 启动按钮橙色
+COLOR_ACCENT_HOVER = "#D08E4C"
+COLOR_TEXT_GRAY = "#AAAAAA"  # 灰色文字
+COLOR_TEXT_DIM = "#888888"  # 更暗的提示文字
 
 
-class LoginWizard:
-    def __init__(self, force_show_settings=False):
-        # force_show_settings 仅影响是否默认展开高级选项
-        self.show_advanced_default = force_show_settings
+class AccountCard(ctk.CTkFrame):
+    """左侧角色列表中的单个卡片"""
+
+    def __init__(self, master, auth_data, is_selected, on_click, on_right_click):
+        super().__init__(master, fg_color=COLOR_CARD_SELECT if is_selected else "transparent", corner_radius=6)
+
+        self.auth_data = auth_data
+        self.uuid = auth_data.get("uuid", "")
+        self.name = auth_data.get("name", "Unknown")
+        self.on_click = on_click
+
+        self.bind("<Button-1>", self._handle_click)
+        self.bind("<Button-3>", lambda e: on_right_click(e, self.uuid))
+
+        self.grid_columnconfigure(1, weight=1)
+
+        # 1. 头像 (模拟)
+        self.avatar = ctk.CTkLabel(
+            self, text=self.name[0].upper(), width=32, height=32,
+            fg_color="#555", corner_radius=4, font=("Arial", 16, "bold")
+        )
+        self.avatar.grid(row=0, column=0, rowspan=2, padx=(10, 8), pady=8)
+        self.avatar.bind("<Button-1>", self._handle_click)
+
+        # 2. 名字
+        self.name_lbl = ctk.CTkLabel(
+            self, text=self.name, font=("Microsoft YaHei UI", 13, "bold"), anchor="w"
+        )
+        self.name_lbl.grid(row=0, column=1, sticky="sw", padx=(0, 10), pady=(6, 0))
+        self.name_lbl.bind("<Button-1>", self._handle_click)
+
+        # 3. 来源
+        api_name = auth_data.get("api_name", "认证账户")
+        self.source_lbl = ctk.CTkLabel(
+            self, text=api_name, font=("Microsoft YaHei UI", 11), text_color="gray", anchor="w"
+        )
+        self.source_lbl.grid(row=1, column=1, sticky="nw", padx=(0, 10), pady=(0, 6))
+        self.source_lbl.bind("<Button-1>", self._handle_click)
+
+        if not is_selected:
+            self.bind("<Enter>", lambda e: self.configure(fg_color=COLOR_CARD_HOVER))
+            self.bind("<Leave>", lambda e: self.configure(fg_color="transparent"))
+
+    def _handle_click(self, event):
+        if self.on_click: self.on_click(self.uuid)
+
+
+class ModernWizard(ctk.CTk):
+    def __init__(self, force_show=False):
+        super().__init__()
         self.setup_success = False
 
+        self.title(f"{constants.PROXY_NAME} 配置向导")
+        # 设置默认大小为最小尺寸 (紧凑模式)
+        self.geometry("800x500")
+        self.minsize(800, 500)
+
+        config_mgr.load()
         self.current_auth_data = None
-        self.saved_accounts_map = {}
 
-        self.window = tk.Tk()
-        self._init_styles()
-        self._setup_window()
-        self._build_layout()
+        self.grid_columnconfigure(0, weight=0)
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
 
-        # 初始化数据
+        self._init_sidebar()
+        self._init_main_panel()
+
         self._refresh_account_list()
+        javaScanner.start_scan(self._on_java_scan_finished)
 
-    def _init_styles(self):
-        style = ttk.Style()
-        style.theme_use('clam')
-
-        style.configure(".", background=COLOR_BG, foreground=COLOR_TEXT, font=(FONT_FAMILY, 9), borderwidth=0)
-        style.configure("Bg.TFrame", background=COLOR_BG)
-        style.configure("Panel.TFrame", background=COLOR_PANEL)
-        style.configure("Card.TLabelframe", background=COLOR_PANEL, bordercolor=COLOR_BORDER, relief="solid",
-                        borderwidth=1)
-        style.configure("Card.TLabelframe.Label", background=COLOR_PANEL, foreground=COLOR_ACCENT,
-                        font=(FONT_FAMILY, 10, "bold"))
-        style.configure("TEntry", fieldbackground=COLOR_INPUT_BG, foreground="white", bordercolor=COLOR_BORDER,
-                        padding=5)
-        style.map("TEntry", bordercolor=[("focus", COLOR_ACCENT)])
-        style.configure("TCombobox", fieldbackground=COLOR_INPUT_BG, background=COLOR_PANEL, foreground="white",
-                        arrowcolor=COLOR_TEXT)
-        style.map("TCombobox", fieldbackground=[("readonly", COLOR_INPUT_BG)],
-                  selectbackground=[("readonly", COLOR_ACCENT)])
-
-        style.configure("Primary.TButton", background=COLOR_ACCENT, foreground="white", borderwidth=0,
-                        font=("Arial", 9, "bold"), padding=6)
-        style.map("Primary.TButton", background=[('active', COLOR_ACCENT_HOVER), ('disabled', '#333333')],
-                  foreground=[('disabled', '#888888')])
-
-        style.configure("Secondary.TButton", background="#3E3E42", foreground="white", borderwidth=0, padding=4)
-        style.map("Secondary.TButton", background=[('active', '#505050')])
-
-        # 红色删除按钮
-        style.configure("Danger.TButton", background="#8B0000", foreground="white", borderwidth=0, padding=4)
-        style.map("Danger.TButton", background=[('active', COLOR_DANGER)])
-
-        style.configure("Dark.TCheckbutton", background=COLOR_BG, foreground=COLOR_TEXT_DIM)
-        style.map("Dark.TCheckbutton", background=[('active', COLOR_BG)])
-        style.configure("Header.TLabel", background=COLOR_BG, foreground="white", font=(FONT_FAMILY, 16, "bold"))
-        style.configure("SubHeader.TLabel", background=COLOR_BG, foreground=COLOR_TEXT_DIM)
-        style.configure("CardHeader.TLabel", background=COLOR_PANEL, foreground=COLOR_ACCENT,
-                        font=(FONT_FAMILY, 10, "bold"))
-
-    def _setup_window(self):
-        self.window.title(f"{constants.PROXY_NAME} 配置向导")
-        self.window.config(bg=COLOR_BG)
-        w, h = 540, 700
-        sw, sh = self.window.winfo_screenwidth(), self.window.winfo_screenheight()
-        self.window.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
-        self.window.minsize(450, 600)
-        self.window.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _on_close(self):
         self.setup_success = False
-        self.window.destroy()
+        self.destroy()
 
-    def _build_layout(self):
-        canvas = tk.Canvas(self.window, bg=COLOR_BG, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(self.window, orient="vertical", command=canvas.yview)
-        self.content = ttk.Frame(canvas, style="Bg.TFrame")
+    # ================= UI 构建 =================
 
-        self.content.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        self.win_id = canvas.create_window((0, 0), window=self.content, anchor="nw")
-        canvas.bind("<Configure>", lambda e: canvas.itemconfig(self.win_id, width=e.width))
-        canvas.configure(yscrollcommand=scrollbar.set)
+    def _init_sidebar(self):
+        self.sidebar = ctk.CTkFrame(self, width=240, corner_radius=0, fg_color=COLOR_SIDEBAR)
+        self.sidebar.grid(row=0, column=0, sticky="nsew")
+        self.sidebar.grid_rowconfigure(1, weight=1)
 
-        def _on_mousewheel(event):
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        # 标题
+        ctk.CTkLabel(
+            self.sidebar, text="账户", font=("Microsoft YaHei UI", 16, "bold"), anchor="w"
+        ).grid(row=0, column=0, sticky="ew", padx=20, pady=(25, 10))
 
-        self.window.bind_all("<MouseWheel>", _on_mousewheel)
+        # 列表 (隐藏滚动条样式但保留功能)
+        self.scroll_frame = ctk.CTkScrollableFrame(
+            self.sidebar,
+            fg_color="transparent",
+            width=220,
+            scrollbar_button_color=COLOR_SIDEBAR,
+            scrollbar_button_hover_color=COLOR_SIDEBAR
+        )
+        self.scroll_frame.grid(row=1, column=0, sticky="nsew", padx=0, pady=0)
 
-        scrollbar.pack(side="right", fill="y")
-        canvas.pack(side="left", fill="both", expand=True)
+        # 底部启动区
+        self.launch_area = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+        self.launch_area.grid(row=2, column=0, sticky="ew", padx=15, pady=20)
 
-        self._ui_header()
-        self._ui_java_card()
-        self._ui_api_card()
-        self._ui_account_card()
-        self._ui_footer()
+        self.launch_btn = ctk.CTkButton(
+            self.launch_area,
+            text="启动游戏",
+            font=("Microsoft YaHei UI", 16, "bold"),
+            height=45,
+            fg_color=COLOR_ACCENT,
+            hover_color=COLOR_ACCENT_HOVER,
+            command=self._on_launch
+        )
+        self.launch_btn.pack(fill="x")
 
-    def _ui_header(self):
-        f = ttk.Frame(self.content, style="Bg.TFrame", padding=(25, 25, 25, 5))
-        f.pack(fill="x")
-        ttk.Label(f, text="启动环境配置", style="Header.TLabel").pack(anchor="w")
-        ttk.Label(f, text="请配置 Java 环境与 Yggdrasil 账号。", style="SubHeader.TLabel").pack(anchor="w", pady=(5, 0))
+        self.ver_lbl = ctk.CTkLabel(self.launch_area, text="Ready to launch", font=("Arial", 10), text_color="gray")
+        self.ver_lbl.pack(pady=(5, 0))
 
-    def _ui_java_card(self):
-        card = ttk.LabelFrame(self.content, style="Card.TLabelframe", padding=15)
-        card.pack(fill="x", padx=20, pady=10)
-        ttk.Label(card, text="Java 运行环境", style="CardHeader.TLabel").pack(anchor="w", pady=(0, 10))
+    def _init_main_panel(self):
+        self.main = ctk.CTkFrame(self, corner_radius=0, fg_color=COLOR_MAIN)
+        self.main.grid(row=0, column=1, sticky="nsew")
 
-        box = ttk.Frame(card, style="Panel.TFrame")
-        box.pack(fill="x")
-        self.java_path_var = tk.StringVar(value=config_mgr.get_real_java_path() or "")
-        self.java_combo = ttk.Combobox(box, textvariable=self.java_path_var, style="TCombobox")
-        self.java_combo.pack(side="left", fill="x", expand=True, padx=(0, 5))
-        self.java_combo.set("扫描中...")
-        ttk.Button(box, text="浏览", style="Secondary.TButton", width=6, command=self._browse_java).pack(side="right")
-        tk.Label(card, text="* 推荐使用 Java 17 或更高版本。", bg=COLOR_PANEL, fg=COLOR_TEXT_DIM, font=("Arial", 8),
-                 anchor="w").pack(fill="x", pady=(5, 0))
-        javaScanner.start_scan(self._on_java_scan_finished)
+        # 顶部留白
+        ctk.CTkFrame(self.main, height=20, fg_color="transparent").pack()
 
-    def _ui_api_card(self):
-        card = ttk.LabelFrame(self.content, style="Card.TLabelframe", padding=15)
-        card.pack(fill="x", padx=20, pady=10)
-        ttk.Label(card, text="认证服务器 (API)", style="CardHeader.TLabel").pack(anchor="w", pady=(0, 10))
+        # --- 1. Java 环境板块 ---
+        self._create_section_container("Java 运行环境")
 
-        apis = config_mgr.get_api_list()
-        names = [a['name'] for a in apis]
-        self.api_combo = ttk.Combobox(card, values=names, state="readonly", style="TCombobox")
-        self.api_combo.pack(fill="x", pady=(0, 5))
-        self.api_combo.bind("<<ComboboxSelected>>", self._on_api_selected)
+        java_row = ctk.CTkFrame(self.current_section, fg_color="transparent")
+        java_row.pack(fill="x", pady=(5, 0))
 
-        self.api_url_var = tk.StringVar()
-        self.api_url_entry = ttk.Entry(card, textvariable=self.api_url_var, state="readonly")
-        self.api_url_entry.pack(fill="x", pady=(0, 10))
+        self.java_var = tkinter.StringVar(value=config_mgr.get_real_java_path() or "")
+        self.java_combo = ctk.CTkComboBox(
+            java_row, variable=self.java_var, width=400, height=32,
+            values=["正在扫描..."]
+        )
+        self.java_combo.pack(side="left", fill="x", expand=True, padx=(0, 8))
 
-        btn_box = ttk.Frame(card, style="Panel.TFrame")
-        btn_box.pack(fill="x")
-        ttk.Button(btn_box, text="新建", style="Secondary.TButton", width=5, command=self._new_api).pack(side="left",
-                                                                                                         padx=(0, 5))
-        self.save_api_btn = ttk.Button(btn_box, text="保存", style="Secondary.TButton", width=5, command=self._save_api,
-                                       state="disabled")
-        self.save_api_btn.pack(side="left", padx=(0, 5))
-        self.del_api_btn = ttk.Button(btn_box, text="删除", style="Secondary.TButton", width=5, command=self._del_api)
-        self.del_api_btn.pack(side="right")
+        ctk.CTkButton(
+            java_row, text="浏览", width=60, height=32, fg_color="#444", hover_color="#555",
+            command=self._browse_java
+        ).pack(side="right")
 
-        self.api_combo.current(config_mgr.get_current_api_index())
-        self._on_api_selected()
+        # --- 2. 认证服务器板块 ---
+        self._create_section_container("认证服务器 (API)")
 
-    def _ui_account_card(self):
-        """
-        合并后的账号卡片
-        上部：账号选择 + 删除 + 复制UUID
-        中部：分割线
-        下部：登录新账号
-        """
-        card = ttk.LabelFrame(self.content, style="Card.TLabelframe", padding=15)
-        card.pack(fill="x", padx=20, pady=10)
-        ttk.Label(card, text="账号与角色", style="CardHeader.TLabel").pack(anchor="w", pady=(0, 10))
+        api_row = ctk.CTkFrame(self.current_section, fg_color="transparent")
+        api_row.pack(fill="x", pady=(5, 0))
 
-        # --- A. 账号选择区 (合并了原来的 saved 和 profile) ---
-        tk.Label(card, text="选择要使用的角色:", bg=COLOR_PANEL, fg=COLOR_TEXT).pack(anchor="w", pady=(0, 2))
+        # API 选择框 (可编辑)
+        self.api_combo = ctk.CTkComboBox(
+            api_row, width=300, height=32,
+            command=self._on_api_change
+        )
+        self.api_combo.pack(side="left", fill="x", expand=True, padx=(0, 8))
 
-        sel_box = ttk.Frame(card, style="Panel.TFrame")
-        sel_box.pack(fill="x", pady=(0, 10))
+        # 新增按钮 (恢复 + 号)
+        ctk.CTkButton(
+            api_row, text="+", width=40, height=32,
+            fg_color="#444", hover_color="#555",
+            command=self._save_custom_api_from_input
+        ).pack(side="left", padx=(0, 8))
 
-        self.account_combo = ttk.Combobox(sel_box, state="readonly", style="TCombobox")
-        self.account_combo.pack(side="left", fill="x", expand=True, padx=(0, 5))
-        self.account_combo.bind("<<ComboboxSelected>>", self._on_account_selected)
+        # 删除按钮
+        ctk.CTkButton(
+            api_row, text="-", width=40, height=32,
+            fg_color="#8B0000", hover_color="#B00000",
+            command=self._del_api
+        ).pack(side="right")
 
-        # 按钮组
-        self.btn_copy_uuid = ttk.Button(sel_box, text="复制 UUID", style="Secondary.TButton", command=self._copy_uuid,
-                                        state="disabled")
-        self.btn_copy_uuid.pack(side="left", padx=(0, 5))
+        # 提示语
+        ctk.CTkLabel(
+            self.current_section, text="* 输入 URL 后点击 + 号保存，或回车直接保存",
+            font=("Arial", 10), text_color=COLOR_TEXT_DIM
+        ).pack(anchor="w", pady=(5, 0))
 
-        self.btn_del_acc = ttk.Button(sel_box, text="删除", style="Danger.TButton", command=self._del_account,
-                                      state="disabled")
-        self.btn_del_acc.pack(side="right")
+        # --- 3. 登录板块 (紧凑布局) ---
+        self._create_section_container("登录新账号")
 
-        ttk.Separator(card, orient="horizontal").pack(fill="x", pady=5)
+        # 邮箱
+        ctk.CTkLabel(
+            self.current_section, text="邮箱 / 用户名:",
+            font=("Microsoft YaHei UI", 12), text_color=COLOR_TEXT_GRAY
+        ).pack(anchor="w", pady=(5, 2))
 
-        # --- B. 登录表单 ---
-        tk.Label(card, text="登录新账号 (验证后自动添加到上方列表):", bg=COLOR_PANEL, fg=COLOR_TEXT_DIM).pack(
-            anchor="w", pady=(5, 5))
+        self.email_entry = ctk.CTkComboBox(
+            self.current_section, height=32,
+            values=config_mgr.get_history_users()
+        )
+        self.email_entry.pack(fill="x", pady=(0, 4))  # [修改] 间距极小
 
-        tk.Label(card, text="邮箱 / 用户名:", bg=COLOR_PANEL, fg=COLOR_TEXT).pack(anchor="w", pady=(0, 2))
-        self.email_combo = ttk.Combobox(card, style="TCombobox")
-        self.email_combo.pack(fill="x", pady=(0, 5))
-        try:
-            self.email_combo['values'] = config_mgr.get_history_users()
-        except:
-            pass
+        # 密码
+        ctk.CTkLabel(
+            self.current_section, text="密码:",
+            font=("Microsoft YaHei UI", 12), text_color=COLOR_TEXT_GRAY
+        ).pack(anchor="w", pady=(0, 2))
 
-        tk.Label(card, text="密码:", bg=COLOR_PANEL, fg=COLOR_TEXT).pack(anchor="w", pady=(0, 2))
-        self.pwd_entry = ttk.Entry(card, show="•")
-        self.pwd_entry.pack(fill="x", pady=(0, 10))
+        self.pwd_entry = ctk.CTkEntry(self.current_section, height=32, show="•")
+        self.pwd_entry.pack(fill="x", pady=(0, 10))  # [修改] 与按钮的间距减小
 
-        self.verify_btn = ttk.Button(card, text="验证并添加", style="Primary.TButton", command=self._on_verify)
-        self.verify_btn.pack(fill="x", pady=(0, 5))
+        # 验证按钮
+        self.login_btn = ctk.CTkButton(
+            self.current_section, text="验证并添加", height=38,
+            font=("Microsoft YaHei UI", 13, "bold"),
+            command=self._on_verify
+        )
+        self.login_btn.pack(fill="x", pady=(0, 5))
 
-    def _ui_footer(self):
-        f = ttk.Frame(self.content, style="Bg.TFrame", padding=20)
-        f.pack(fill="x", side="bottom")
-        # 统一按钮为“启动游戏”，哪怕是配置模式，也是“保存并准备启动”
-        self.launch_btn = ttk.Button(f, text="启动游戏", style="Primary.TButton", command=self._on_launch)
-        self.launch_btn.pack(fill="x", ipady=8)
+        # 初始化数据
+        self._refresh_api_ui()
+        # 绑定回车保存 API
+        self.api_combo.bind("<Return>", lambda e: self._save_custom_api_from_input())
 
-    # ================= 2. 逻辑控制 =================
+    def _create_section_container(self, title):
+        container = ctk.CTkFrame(self.main, fg_color="transparent")
+        container.pack(fill="x", padx=30, pady=(0, 25))
 
-    # --- 账号列表管理 (核心修改) ---
+        ctk.CTkLabel(
+            container, text=title,
+            font=("Microsoft YaHei UI", 13, "bold"), text_color=COLOR_ACCENT
+        ).pack(anchor="w")
+
+        self.current_section = container
+
+    # ================= 逻辑处理 =================
 
     def _refresh_account_list(self):
-        """刷新下拉框，列出 config 中所有已保存的角色"""
-        accounts = config_mgr.get_all_accounts()  # [{'uuid':..., 'name':...}, ...]
-        self.saved_accounts_map = {}
-        display_names = []
+        for widget in self.scroll_frame.winfo_children():
+            widget.destroy()
 
-        # 获取当前“默认/选中”的UUID，用于回显
-        # 注意：main.py 会根据 instance_map 找，找不到才找 default
-        # 这里我们主要回显 default，或者用户刚刚添加的那个
+        accounts = config_mgr.get_all_accounts()
         default_uuid = config_mgr._config_data.get("default_account_uuid")
-        sel_index = 0
 
         for acc in accounts:
-            name = acc.get("name", "Unknown")
-            uuid = acc.get("uuid", "???")
-            # 格式: Name (UUID前8位)
-            label = f"{name} ({uuid[:8]}...)"
+            is_sel = (acc["uuid"] == default_uuid)
+            if is_sel: self.current_auth_data = acc
+            AccountCard(self.scroll_frame, acc, is_sel, self._select_account, self._show_context_menu).pack(fill="x",
+                                                                                                            pady=2)
 
-            self.saved_accounts_map[label] = acc
-            display_names.append(label)
+        if not self.current_auth_data and accounts:
+            self._select_account(accounts[0]["uuid"])
 
-            if uuid == default_uuid:
-                sel_index = len(display_names) - 1
+    def _select_account(self, uuid):
+        config_mgr.set_default_account(uuid)
+        self._refresh_account_list()
 
-        self.account_combo['values'] = display_names
+    def _show_context_menu(self, event, uuid):
+        m = tkinter.Menu(self, tearoff=0)
+        m.add_command(label="复制 UUID", command=lambda: self._copy_uuid(uuid))
+        m.add_separator()
+        m.add_command(label="删除账号", command=lambda: self._del_account(uuid))
+        m.tk_popup(event.x_root, event.y_root)
 
-        if display_names:
-            if sel_index >= len(display_names): sel_index = 0
-            self.account_combo.current(sel_index)
-            self._on_account_selected()  # 触发联动
-        else:
-            self.account_combo.set("请先登录添加账号...")
-            self.btn_copy_uuid.config(state="disabled")
-            self.btn_del_acc.config(state="disabled")
-            self.current_auth_data = None
+    def _copy_uuid(self, uuid):
+        self.clipboard_clear()
+        self.clipboard_append(uuid)
+        messagebox.showinfo("提示", "UUID 已复制")
 
-    def _on_account_selected(self, event=None):
-        label = self.account_combo.get()
-        auth = self.saved_accounts_map.get(label)
-        if auth:
-            self.current_auth_data = auth
-            self.btn_copy_uuid.config(state="normal")
-            self.btn_del_acc.config(state="normal")
-            # 自动填入邮箱到登录框（方便重新验证）
-            if "user_email" in auth:
-                self.email_combo.set(auth["user_email"])
-
-    def _copy_uuid(self):
-        if self.current_auth_data:
-            uuid = self.current_auth_data.get("uuid", "")
-            self.window.clipboard_clear()
-            self.window.clipboard_append(uuid)
-            orig = self.btn_copy_uuid['text']
-            self.btn_copy_uuid.config(text="已复制")
-            self.window.after(1000, lambda: self.btn_copy_uuid.config(text=orig))
-
-    def _del_account(self):
-        """删除当前选中的账号"""
-        if not self.current_auth_data: return
-        name = self.current_auth_data.get("name")
-        uuid = self.current_auth_data.get("uuid")
-
-        if messagebox.askyesno("删除账号", f"确定要删除角色 '{name}' 吗？\n该操作无法撤销。"):
+    def _del_account(self, uuid):
+        if messagebox.askyesno("确认", "确定删除该账号吗？"):
             config_mgr.remove_account(uuid)
             self._refresh_account_list()
 
-    # --- 登录验证 (修改后支持一次添加多个角色) ---
+    # --- API 逻辑 ---
+    def _refresh_api_ui(self):
+        apis = config_mgr.get_api_list()
+        names = [a["name"] for a in apis]
+        self.api_combo.configure(values=names)
 
+        idx = config_mgr.get_current_api_index()
+        if 0 <= idx < len(names):
+            self.api_combo.set(names[idx])
+        else:
+            self.api_combo.set(names[0])
+
+    def _on_api_change(self, choice):
+        apis = config_mgr.get_api_list()
+        for i, a in enumerate(apis):
+            if a["name"] == choice:
+                config_mgr.set_current_api_index(i)
+                break
+
+    def _save_custom_api_from_input(self):
+        text = self.api_combo.get().strip()
+        if not text: return None
+
+        apis = config_mgr.get_api_list()
+        for i, a in enumerate(apis):
+            if a["name"] == text or a["base_url"] == text:
+                config_mgr.set_current_api_index(i)
+                return a
+
+        if text.startswith("http"):
+            url = text.rstrip('/')
+            try:
+                domain = url.split('//')[1].split('/')[0]
+                name = f"Custom ({domain})"
+            except:
+                name = f"Custom ({len(apis)})"
+
+            new_api = {"name": name, "base_url": url}
+            apis.append(new_api)
+            config_mgr.set_api_list(apis)
+            config_mgr.set_current_api_index(len(apis) - 1)
+            config_mgr.save()
+
+            self._refresh_api_ui()
+            self.api_combo.set(name)
+            messagebox.showinfo("提示", "新 API 已保存")
+            return new_api
+
+        return None
+
+    def _del_api(self):
+        idx = config_mgr.get_current_api_index()
+        if idx == 0: return messagebox.showwarning("禁止", "默认 API 不可删除")
+
+        l = config_mgr.get_api_list()
+        name = l[idx]["name"]
+
+        if messagebox.askyesno("删除", f"确定删除 API '{name}' 吗？"):
+            l.pop(idx)
+            config_mgr.set_api_list(l)
+            config_mgr.set_current_api_index(0)
+            config_mgr.save()
+            self._refresh_api_ui()
+
+    # --- 登录逻辑 ---
     def _on_verify(self):
-        email = self.email_combo.get().strip()
+        email = self.email_entry.get().strip()
         pwd = self.pwd_entry.get().strip()
-        if not email or not pwd: return messagebox.showwarning("提示", "请输入账号密码")
+        if not email or not pwd: return
+
+        current_text = self.api_combo.get()
+        if current_text.startswith("http"):
+            self._save_custom_api_from_input()
 
         api = config_mgr.get_current_api_config()
-        if not api.get("base_url"): return messagebox.showerror("错误", "API 无效")
+        url = f"{api['base_url']}/authserver/authenticate"
 
-        self.verify_btn.config(state="disabled", text="验证中...")
-        threading.Thread(target=self._do_verify, args=(f"{api['base_url']}/authserver/authenticate", email, pwd),
-                         daemon=True).start()
+        self.login_btn.configure(text="验证中...", state="disabled")
+        threading.Thread(target=self._do_verify, args=(url, email, pwd), daemon=True).start()
 
     def _do_verify(self, u, e, p):
         try:
-            d = authAPI.authenticate(u, e, p)
-            self.window.after(0, lambda: self._on_verify_success(d, e))
-        except Exception as x:
-            self.window.after(0, lambda: self._on_verify_fail(x))
+            data = authAPI.authenticate(u, e, p)
+            self.after(0, lambda: self._on_login_success(data, e))
+        except Exception as err:
+            self.after(0, lambda: self._on_login_fail(err))
 
-    def _on_verify_success(self, data, email):
-        self.verify_btn.config(state="normal", text="验证并添加")
+    def _on_login_success(self, data, email):
+        self.login_btn.configure(text="验证并添加", state="normal")
 
-        # 获取所有可用角色
         profiles = data.get("availableProfiles", [])
-        selected = data.get("selectedProfile")
+        if not profiles and data.get("selectedProfile"):
+            profiles = [data["selectedProfile"]]
 
         if not profiles:
-            if selected:
-                profiles = [selected]
-            else:
-                return messagebox.showerror("失败", "该账号无游戏角色")
+            return messagebox.showerror("错误", "该账号没有游戏角色")
 
-        # 将所有角色都存入 config
-        # 注意：所有角色共享同一个 accessToken (Yggdrasil 机制)
-        count = 0
-        target_uuid = None  # 用于选中最后默认的那个
+        # 获取当前 API 名称简写
+        api_cfg = config_mgr.get_current_api_config()
+        # 尝试只取括号前或域名的部分，让显示短一点
+        api_name_short = api_cfg["name"]
+        if "(" in api_name_short:
+            api_name_short = api_name_short.split('(')[0].strip()
 
         for p in profiles:
-            auth_data = {
+            acc = {
                 "uuid": p["id"],
                 "name": p["name"],
                 "accessToken": data["accessToken"],
                 "clientToken": data.get("clientToken"),
-                "user_email": email
+                "user_email": email,
+                "api_name": api_name_short
             }
-            config_mgr.add_or_update_account(auth_data)
-            count += 1
-            # 优先选中 selectedProfile，否则选中列表里最后一个
-            if selected and p["id"] == selected["id"]:
-                target_uuid = p["id"]
-            elif not target_uuid:
-                target_uuid = p["id"]
+            config_mgr.add_or_update_account(acc)
 
-        # 保存历史并刷新 UI
         config_mgr.add_history_user(email)
-        self.pwd_entry.delete(0, tk.END)
-
-        # 刷新下拉框
+        self.pwd_entry.delete(0, "end")
         self._refresh_account_list()
+        messagebox.showinfo("成功", f"成功添加 {len(profiles)} 个角色")
 
-        # 自动选中刚添加的
-        if target_uuid:
-            # 设为默认，这样 _refresh_account_list 会自动选中它
-            config_mgr._config_data["default_account_uuid"] = target_uuid
-            self._refresh_account_list()
+    def _on_login_fail(self, e):
+        self.login_btn.configure(text="验证并添加", state="normal")
+        messagebox.showerror("验证失败", str(e))
 
-        messagebox.showinfo("成功", f"验证成功！已添加 {count} 个角色到列表。")
-
-    def _on_verify_fail(self, e):
-        self.verify_btn.config(state="normal", text="验证并添加")
-        msg = str(e)
-        if isinstance(e, requests.exceptions.HTTPError):
-            try:
-                msg = e.response.json().get("errorMessage", msg)
-            except:
-                pass
-        messagebox.showerror("验证失败", msg)
-
-    # --- 其他辅助逻辑 (Java/API) ---
-    # (保持原样，略微精简代码以适配上下文)
+    # --- Java ---
     def _on_java_scan_finished(self, paths):
+        if not self.winfo_exists(): return
         curr = config_mgr.get_real_java_path()
-        if curr and curr not in paths and os.path.exists(curr): paths.append(curr)
-        paths = sorted(list(set(paths)))
-        self.window.after(0, lambda: self._upd_j(paths))
+        if curr and curr not in paths: paths.insert(0, curr)
 
-    def _upd_j(self, p):
-        if self.window.winfo_exists():
-            self.java_combo['values'] = p
-            if self.java_path_var.get() in p:
-                self.java_combo.current(p.index(self.java_path_var.get()))
-            elif p:
-                self.java_combo.current(0)
+        self.java_combo.configure(values=paths)
+        if curr:
+            self.java_combo.set(curr)
+        elif paths:
+            self.java_combo.set(paths[0])
 
     def _browse_java(self):
-        fn = filedialog.askopenfilename()
-        if fn:
-            self.java_path_var.set(fn)
-            self.java_combo.set(fn)
-
-    def _on_api_selected(self, e=None):
-        idx = self.api_combo.current()
-        apis = config_mgr.get_api_list()
-        if 0 <= idx < len(apis):
-            self.api_url_var.set(apis[idx]["base_url"])
-            self.api_url_entry.config(state="readonly")
-            self.save_api_btn.config(state="disabled")
-            self.del_api_btn.config(state="disabled" if idx == 0 else "normal")
-        config_mgr.set_current_api_index(idx)
-
-    def _new_api(self):
-        self.api_combo.set("New API");
-        self.api_url_entry.config(state="normal");
-        self.api_url_entry.focus_set()
-        self.save_api_btn.config(state="normal");
-        self.del_api_btn.config(state="disabled")
-
-    def _save_api(self):
-        u = self.api_url_var.get().strip().rstrip('/')
-        if not u.startswith("http"): return messagebox.showerror("错误", "URL无效")
-        try:
-            l = config_mgr.get_api_list()
-            l.append({"name": f"自定义 ({u.split('//')[1].split('/')[0]})", "base_url": u})
-            config_mgr.set_api_list(l)
-            self.api_combo['values'] = [x['name'] for x in l]
-            self.api_combo.current(len(l) - 1)
-            self._on_api_selected()
-            config_mgr.save()
-        except:
-            messagebox.showerror("错误", "保存失败")
-
-    def _del_api(self):
-        idx = self.api_combo.current()
-        if idx == 0: return
-        if messagebox.askyesno("删除", "确定删除？"):
-            l = config_mgr.get_api_list()
-            l.pop(idx)
-            config_mgr.set_api_list(l)
-            self.api_combo['values'] = [x['name'] for x in l]
-            self.api_combo.current(0);
-            self._on_api_selected();
-            config_mgr.save()
+        f = tkinter.filedialog.askopenfilename(filetypes=[("Java Executable", "*.exe;java")])
+        if f:
+            self.java_var.set(f)
+            self.java_combo.set(f)
 
     # --- 启动 ---
-
     def _on_launch(self):
-        # 1. 验证 Java
-        path = self.java_path_var.get()
-        if not path: return messagebox.showerror("错误", "请选择 Java")
-        config_mgr.set_real_java_path(path)
+        if self.api_combo.get().startswith("http"):
+            self._save_custom_api_from_input()
 
         if not self.current_auth_data:
-            return messagebox.showerror("错误", "请选择一个账号")
+            return messagebox.showwarning("提示", "请先选择一个账号")
 
-        # 2. 【核心修复】执行角色绑定 (Profile Binding)
-        # 我们手里的 Token 可能是“无主”的，必须通过 Refresh + SelectedProfile 把它变成“有主”的
-        # 只有“有主”的 Token 才能通过 validate
+        j = self.java_var.get()
+        if not j: return messagebox.showwarning("提示", "Java 路径为空")
+        config_mgr.set_real_java_path(j)
 
         api = config_mgr.get_current_api_config()
-        base_url = api.get("base_url", "").rstrip('/')
-
-        # 构造 Profile 对象
-        target_profile = {
-            "id": self.current_auth_data["uuid"],
-            "name": self.current_auth_data["name"]
-        }
 
         try:
-            # 尝试绑定 (Refresh with Profile)
-            # 注意：即便 Token 已经是绑定的，再次绑定通常也是安全的（刷新有效期）
-            print(f"Binding token to profile: {target_profile['name']}")
-
+            profile = {"id": self.current_auth_data["uuid"], "name": self.current_auth_data["name"]}
             new_data = authAPI.refresh(
-                f"{base_url}/authserver/refresh",
+                f"{api['base_url']}/authserver/refresh",
                 self.current_auth_data["accessToken"],
                 self.current_auth_data.get("clientToken"),
-                selected_profile=target_profile
+                selected_profile=profile
             )
-
-            # 更新内存中的数据为“已绑定”的新 Token
             self.current_auth_data["accessToken"] = new_data["accessToken"]
-            # clientToken 通常不变，但以防万一
-            if "clientToken" in new_data:
-                self.current_auth_data["clientToken"] = new_data["clientToken"]
-
-            # 保存到 Config
             config_mgr.add_or_update_account(self.current_auth_data)
-
         except Exception as e:
-            # 如果绑定失败，可能是网络问题，也可能是 Token 彻底过期
-            # 这里我们提示错误，不强行关闭，让用户决定是否重试登录
-            return messagebox.showerror("绑定角色失败", f"无法绑定角色，请尝试重新登录。\n{e}")
+            print(f"Refresh warning: {e}")
+            pass
 
-        # 3. 设置默认并退出
-        config_mgr._config_data["default_account_uuid"] = self.current_auth_data["uuid"]
         config_mgr.save()
-
         self.setup_success = True
-        self.window.destroy()
+        self.destroy()
 
     def run(self):
-        self.window.mainloop()
+        self.mainloop()
         return self.setup_success
 
 
 def show_wizard(force_show_settings=False):
-    app = LoginWizard(force_show_settings)
+    app = ModernWizard(force_show_settings)
     return app.run()
