@@ -192,6 +192,34 @@ class ModernWizard(ctk.CTk):
         self.setup_success = False
         self.destroy()
 
+    # 自定义弹窗
+    def _show_custom_dialog(self, title, content, width=600, height=371):
+        """自定义大小的弹窗"""
+        top = ctk.CTkToplevel(self)
+        top.title(title)
+        top.geometry(f"{width}x{height}")
+
+        top.minsize(width, height)
+
+        # 强制置顶并模态
+        top.attributes("-topmost", True)
+        top.transient(self)
+        top.grab_set()
+
+        # 居中计算
+        x = self.winfo_x() + (self.winfo_width() // 2) - (width // 2)
+        y = self.winfo_y() + (self.winfo_height() // 2) - (height // 2)
+        top.geometry(f"+{x}+{y}")
+
+        # 文本框
+        textbox = ctk.CTkTextbox(top, wrap="word", font=("Consolas", 12))
+        textbox.pack(fill="both", expand=True, padx=20, pady=20)
+        textbox.insert("0.0", content)
+        textbox.configure(state="disabled")  # 只读
+
+        # 关闭按钮
+        ctk.CTkButton(top, text="关闭", command=top.destroy).pack(pady=(0, 20))
+
     # ================= UI 构建 =================
 
     def _init_sidebar(self):
@@ -627,9 +655,18 @@ class ModernWizard(ctk.CTk):
                 messagebox.showerror("错误", "无效的 Java 可执行文件")
 
     def _show_java_details(self):
-        # 优先使用 _on_java_change 里缓存的 info 对象
-        # 因为现在输入框里是短名字，无法直接去 map 里查了
         info = getattr(self, "current_java_info", None)
+
+        if not info:
+            # 尝试通过 map 反查
+            path = self.java_combo.get()
+            # 如果 map 里存的是长名字，尝试直接 get；如果是短名字，无法反查，只能提示
+            # 由于我们现在的逻辑是选中后变短名字，所以这里大概率依赖 current_java_info
+            # 如果没有，尝试重新获取一下
+            for k, v in self.java_map.items():
+                if v["path"] == getattr(self, "selected_java_path", ""):
+                    info = v
+                    break
 
         if not info:
             return messagebox.showinfo("详情", "请先选择一个有效的 Java 环境")
@@ -637,8 +674,10 @@ class ModernWizard(ctk.CTk):
         msg = f"版本: {info.get('version')}\n" \
               f"架构: {info.get('arch')}\n" \
               f"路径: {info.get('path')}\n\n" \
-              f"原始输出:\n{info.get('raw_info')}"
-        messagebox.showinfo("Java 详情", msg)
+              f"========= 原始输出 =========\n{info.get('raw_info')}"
+
+        # 【修改】使用自定义弹窗，宽600，高371
+        self._show_custom_dialog("Java 详情", msg, 600, 371)
 
     # --- 启动 ---
     def _on_launch(self):
