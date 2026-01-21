@@ -222,26 +222,6 @@ class LoginWizard:
         self.verify_btn = ttk.Button(card, text="验证并添加", style="Primary.TButton", command=self._on_verify)
         self.verify_btn.pack(fill="x", pady=(0, 5))
 
-    def _ui_advanced_card(self):
-        f = ttk.Frame(self.content, style="Bg.TFrame", padding=(20, 0))
-        f.pack(fill="x")
-        self.show_adv = tk.BooleanVar(value=self.show_advanced_default)
-        self.adv_box = ttk.Frame(self.content, style="Bg.TFrame", padding=(20, 5, 20, 5))
-
-        def toggle():
-            if self.show_adv.get():
-                self.adv_box.pack(fill="x")
-            else:
-                self.adv_box.pack_forget()
-
-        ttk.Checkbutton(f, text="显示高级选项", variable=self.show_adv, command=toggle, style="Dark.TCheckbutton").pack(
-            anchor="w")
-        if self.show_advanced_default: self.adv_box.pack(fill="x")
-
-        self.spoof_var = tk.StringVar(value=config_mgr.get_spoof_version())
-        tk.Label(self.adv_box, text="伪装 Java 版本:", bg=COLOR_BG, fg=COLOR_TEXT).pack(anchor="w")
-        ttk.Entry(self.adv_box, textvariable=self.spoof_var).pack(fill="x")
-
     def _ui_footer(self):
         f = ttk.Frame(self.content, style="Bg.TFrame", padding=20)
         f.pack(fill="x", side="bottom")
@@ -471,9 +451,6 @@ class LoginWizard:
         path = self.java_path_var.get()
         if not path: return messagebox.showerror("错误", "请选择 Java")
         config_mgr.set_real_java_path(path)
-
-        sp = self.spoof_var.get().strip()
-        config_mgr.set_spoof_version(sp if sp else constants.DEFAULT_SPOOF_VERSION)
 
         if not self.current_auth_data:
             return messagebox.showerror("错误", "请选择一个账号")

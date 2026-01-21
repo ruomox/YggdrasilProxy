@@ -39,8 +39,7 @@ class ConfigManager:
             "login_history": [],
             "default_account_uuid": None,  # 仍保留作为 GUI 选中的临时存储
             "api_list": constants.DEFAULT_API_LIST,
-            "current_api_index": 0,
-            "spoof_version": constants.DEFAULT_SPOOF_VERSION
+            "current_api_index": 0
         }
 
         self._ensure_data_dir()
@@ -230,12 +229,6 @@ class ConfigManager:
 
     def set_real_java_path(self, path):
         with self._lock: self._config_data["real_java_path"] = path
-
-    def get_spoof_version(self):
-        with self._lock: return self._config_data.get("spoof_version", constants.DEFAULT_SPOOF_VERSION)
-
-    def set_spoof_version(self, v):
-        with self._lock: self._config_data["spoof_version"] = v
 
     def get_api_list(self):
         with self._lock: return list(self._config_data.get("api_list", constants.DEFAULT_API_LIST))

@@ -22,9 +22,6 @@ RUNTIME_DIR_NAME = "YggProRuntime"
 JRE_DIR_NAME = "YggProJRE"
 INJECTOR_FILENAME = "authlib-injector.jar"
 
-# 默认的伪装版本字符串
-DEFAULT_SPOOF_VERSION = ""
-
 # 默认 API 列表模板
 DEFAULT_API_LIST = [
     {
@@ -57,6 +54,56 @@ KNOWN_GAME_MAINS = [
 
 # 最终要调用的真实游戏主类 (用于替换 Wrapper)
 REAL_MINECRAFT_MAIN = "net.minecraft.client.main.Main"
+
+# =========================================================================
+# Java 扫描路径
+# =========================================================================
+JAVA_SCAN_PATHS = {
+    "Darwin": [
+        # --- Prism Launcher ---
+        "~/Library/Application Support/PrismLauncher/java",
+        "~/Library/Application Support/PrismLauncher/jre",
+        "~/Library/Application Support/PrismLauncher/runtime",
+
+        # --- Homebrew ---
+        "/opt/homebrew/opt/openjdk",
+        "/opt/homebrew/Cellar/openjdk",
+        "/usr/local/opt/openjdk",
+        "/usr/local/Cellar/openjdk",
+
+        # --- Apple 官方 ---
+        "/Library/Java/JavaVirtualMachines",
+        "~/Library/Java/JavaVirtualMachines",
+    ],
+
+    "Windows": [
+        # --- Prism Launcher ---
+        "%APPDATA%\\PrismLauncher\\java",
+        "%APPDATA%\\PrismLauncher\\jre",
+        "%APPDATA%\\PrismLauncher\\runtime",
+
+        # --- 官方 / 第三方 ---
+        "C:\\Program Files\\Java",
+        "C:\\Program Files\\Eclipse Adoptium",
+    ],
+
+    "Linux": [
+        # --- Prism Launcher ---
+        "~/.local/share/PrismLauncher/java",
+        "~/.local/share/PrismLauncher/jre",
+        "~/.local/share/PrismLauncher/runtime",
+
+        # --- 系统 ---
+        "/usr/lib/jvm",
+        "/usr/java",
+    ],
+}
+
+WINDOWS_JAVA_REGISTRY_KEYS = [
+    r"SOFTWARE\JavaSoft\Java Runtime Environment",
+    r"SOFTWARE\JavaSoft\Java Development Kit",
+    r"SOFTWARE\Wow6432Node\JavaSoft\Java Runtime Environment",
+]
 
 # ================= 调试开关 =================
 DEBUG_MODE = False
