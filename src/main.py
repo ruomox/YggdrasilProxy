@@ -212,23 +212,56 @@ def main():
     if not captured_game_args:
         sys.exit(subprocess.call([target_java] + raw_args))
 
-    # [补充清洗] 检查解包后的参数（针对 @argfile 或 Wrapper 隐藏参数的情况）
-    if "--yggpro" in captured_game_args or "--yggproconfig" in captured_game_args:
+    # [2] 补充清洗 检查解包后的参数（针对 @argfile 或 Wrapper 隐藏参数的情况）
+    if "--yggpro" in captured_game_args:
         force_config_mode = True
         # 再次清洗，确保不传给游戏
-        captured_game_args = [arg for arg in captured_game_args if arg not in ("--yggpro", "--yggproconfig")]
+        captured_game_args = [arg for arg in captured_game_args if arg not in "--yggpro"]
 
-    # [2] 账号
+    # [3] versionType 统一修正
+    new_game_args = []
+    i = 0
+    found_version_type = False
+
+    while i < len(captured_game_args):
+        arg = captured_game_args[i]
+
+        if arg == "--versionType":
+            new_game_args.append("--versionType")
+            new_game_args.append(constants.PROXY_VERSION_TYPE)
+            found_version_type = True
+            i += 2
+            continue
+
+        if arg.startswith("--versionType="):
+            new_game_args.append(f"--versionType={constants.PROXY_VERSION_TYPE}")
+            found_version_type = True
+            i += 1
+            continue
+
+        new_game_args.append(arg)
+        i += 1
+
+    if not found_version_type:
+        new_game_args.extend([
+            "--versionType",
+            constants.PROXY_VERSION_TYPE
+        ])
+
+    captured_game_args = new_game_args
+
+    # [4] 账号
     game_dir = get_game_dir(captured_game_args)
     auth_data = ensure_account_valid(game_dir, force_gui=force_config_mode)
     if not auth_data: sys.exit(1)
 
-    # [3] 组装
+    # [5] 组装
     injector = runtimeMGR.get_injector_jar()
     api = config_mgr.get_current_api_config()
 
     final_cmd = [target_java]
     final_cmd.append(f"-javaagent:{injector}={api['base_url']}")
+    final_cmd.append("-Dauthlibinjector.noShowServerName")
 
     if jvm_args_prefix:
         final_cmd.extend(jvm_args_prefix)

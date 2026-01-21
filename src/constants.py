@@ -4,6 +4,8 @@
 PROXY_NAME = "YggdrasilProxy"
 PROXY_VERSION = "1.0.0"
 CONFIG_VERSION = 1
+# Minecraft 主界面左下角显示用的 versionType
+PROXY_VERSION_TYPE = f"{PROXY_NAME} {PROXY_VERSION}"
 
 # Yggdrasil 协议标准常量
 AUTH_AGENT = {
