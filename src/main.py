@@ -153,10 +153,6 @@ def ensure_account_valid(game_dir, force_gui=False):
 def main():
     raw_args = sys.argv[1:]
 
-    if "--yggproconfig" in raw_args:
-        guiWizard.show_wizard(force_show_settings=True);
-        sys.exit(0)
-
     config_mgr.load()
     tool_java = runtimeMGR.get_fallback_java()
     if not tool_java: sys.exit(1)
@@ -215,7 +211,7 @@ def main():
     if jvm_args_prefix:
         final_cmd.extend(jvm_args_prefix)
 
-    sensitive = {"--username", "--uuid", "--accessToken", "--userProperties", "--yggproconfig"}
+    sensitive = {"--username", "--uuid", "--accessToken", "--userProperties"}
     skip = False
 
     for arg in captured_game_args:

@@ -20,9 +20,6 @@ RUNTIME_DIR_NAME = "YggProRuntime"
 JRE_DIR_NAME = "YggProJRE"
 INJECTOR_FILENAME = "authlib-injector.jar"
 
-# 强制显示设置界面的参数集合
-SETTINGS_ARGS = {"--yggproconfig"}
-
 # 默认的伪装版本字符串
 DEFAULT_SPOOF_VERSION = ""
 
