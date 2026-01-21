@@ -41,12 +41,20 @@ class AccountCard(ctk.CTkFrame):
 
         self.grid_columnconfigure(1, weight=1)
 
-        # 1. 头像
+        # ================= 头像初始化 (修复闪烁) =================
+        # 1. 同步获取：尝试直接拿本地缓存或默认Steve图片
+        # 这样创建时就直接显示图片，没有文字阶段
+        initial_img = AvatarManager.get_local_cache_sync(self.uuid)
+        ctk_img = ctk.CTkImage(light_image=initial_img, dark_image=initial_img, size=(32, 32))
+        self._kept_image = ctk_img  # 防止回收
+
         self.avatar = ctk.CTkLabel(
-            self, text=self.name[0].upper(), width=32, height=32,
-            fg_color="#555", corner_radius=4, font=("Arial", 16, "bold")
+            self, text="", image=ctk_img,  # 直接设置图片，text为空
+            fg_color="transparent",
+            width=32, height=32
         )
         self.avatar.grid(row=0, column=0, rowspan=2, padx=(10, 8), pady=8)
+        # ========================================================
 
         # 2. 名字
         self.name_lbl = ctk.CTkLabel(
@@ -61,42 +69,38 @@ class AccountCard(ctk.CTkFrame):
         )
         self.source_lbl.grid(row=1, column=1, sticky="nw", padx=(0, 10), pady=(0, 6))
 
-        # --- 事件绑定修复 ---
-
-        # 内部函数：统一处理点击
+        # --- 事件绑定 ---
         def _left(e):
             if self.on_click: self.on_click(self.uuid)
 
         def _right(e):
             if on_right_click: on_right_click(e, self.uuid)
 
-        # 1. 绑定 Frame 本身
         self.bind("<Button-1>", _left)
-        self.bind("<Button-3>", _right)  # Win/Linux 右键
-        self.bind("<Button-2>", _right)  # macOS 右键
+        self.bind("<Button-3>", _right)
+        self.bind("<Button-2>", _right)
 
-        # 2. 【关键】绑定所有子控件 (Label)
-        # 否则点在文字上没反应
         for widget in self.winfo_children():
             widget.bind("<Button-1>", _left)
             widget.bind("<Button-3>", _right)
             widget.bind("<Button-2>", _right)
 
-            # 顺便修复悬停判定：子控件也要触发悬停逻辑
             if not is_selected:
                 widget.bind("<Enter>", self._on_enter)
                 widget.bind("<Leave>", self._on_leave)
 
-        # Frame 本身的悬停
         if not is_selected:
             self.bind("<Enter>", self._on_enter)
             self.bind("<Leave>", self._on_leave)
+
+        # --- 启动异步更新 ---
+        # 虽然已经显示了图片，但仍需后台检查是否有新皮肤
+        self._start_avatar_update()
 
     def _on_enter(self, event):
         self.configure(fg_color=COLOR_CARD_HOVER)
 
     def _on_leave(self, event):
-        # 严格判定：只有鼠标真的移出了 Frame 矩形范围才重置颜色
         x, y = self.winfo_pointerx(), self.winfo_pointery()
         widget_x, widget_y = self.winfo_rootx(), self.winfo_rooty()
         width, height = self.winfo_width(), self.winfo_height()
@@ -104,6 +108,40 @@ class AccountCard(ctk.CTkFrame):
         if widget_x <= x <= widget_x + width and widget_y <= y <= widget_y + height:
             return
         self.configure(fg_color="transparent")
+
+    # ================== 后台检查更新 ==================
+
+    def _start_avatar_update(self):
+        api_url = None
+        target_name = self.auth_data.get("api_name")
+
+        if target_name:
+            apis = config_mgr.get_api_list()
+            for a in apis:
+                if target_name in a["name"] or a["name"] in target_name:
+                    api_url = a["base_url"]
+                    break
+
+        if not api_url:
+            api_url = config_mgr.get_current_api_config()["base_url"]
+
+        # 调用异步方法检查更新
+        AvatarManager.get_avatar(self.uuid, api_url, self._on_avatar_updated)
+
+    def _on_avatar_updated(self, pil_img):
+        """只有当下载到了更新的皮肤时，才会回调这里"""
+        if pil_img and self.winfo_exists():
+            try:
+                self.after(0, lambda: self._apply_avatar(pil_img))
+            except:
+                pass
+
+    def _apply_avatar(self, pil_img):
+        if not self.winfo_exists(): return
+
+        ctk_img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(32, 32))
+        self._kept_image = ctk_img  # 防止回收
+        self.avatar.configure(image=self._kept_image)
 
 
 class ModernWizard(ctk.CTk):

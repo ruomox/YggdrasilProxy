@@ -6,114 +6,142 @@ import base64
 import json
 import io
 import glob
-from PIL import Image
+from PIL import Image, ImageDraw
 from src.configMGR import config_mgr
 
 
 class AvatarManager:
-    """
-    头像管理器
-    负责：异步下载、基于Hash的缓存更新、图像裁剪
-    """
-    # 缓存路径：.YggProxy/cache/avatars
     CACHE_DIR = os.path.join(config_mgr._data_dir, "cache", "avatars")
 
-    # 内存缓存 (Session级)，防止短时间内频繁读取磁盘
-    # key: uuid, value: PIL.Image
-    _MEM_CACHE = {}
-    _LOCK = threading.Lock()
+    # 定义放大倍数
+    SCALE_HEAD = 8  # 内层放大 8 倍 (8x8 -> 64x64)
+    SCALE_HAT = 9  # 外层放大 9 倍 (8x8 -> 72x72) -> 这样帽子就比头大一圈
+    CANVAS_SIZE = 72  # 最终图片大小
 
     @classmethod
     def get_avatar(cls, uuid, api_url, callback):
-        """
-        [异步入口] 获取头像
-        :param uuid: 玩家 UUID
-        :param api_url: 认证服务器 Base URL
-        :param callback: 回调函数，接收参数 (PIL.Image or None)
-        """
-        # 启动后台线程，避免卡顿 GUI
         threading.Thread(target=cls._worker, args=(uuid, api_url, callback), daemon=True).start()
+
+    @classmethod
+    def get_local_cache_sync(cls, uuid):
+        clean_uuid = uuid.replace("-", "")
+        if os.path.exists(cls.CACHE_DIR):
+            pattern = os.path.join(cls.CACHE_DIR, f"{clean_uuid}@*.png")
+            files = glob.glob(pattern)
+            if files:
+                try:
+                    return Image.open(files[0])
+                except:
+                    pass
+        return cls._get_default_steve()
 
     @classmethod
     def _worker(cls, uuid, api_url, callback):
         try:
-            # 1. 确保缓存目录存在
             if not os.path.exists(cls.CACHE_DIR):
                 os.makedirs(cls.CACHE_DIR, exist_ok=True)
 
-            # 2. 获取 Profile 以拿到最新的皮肤 Hash
-            # 注意：这一步是轻量级网络请求，为了感知更新，这步是必须的
-            # (如果完全离线，可以跳过这步直接读本地文件，但就无法感知更新了)
+            clean_uuid = uuid.replace("-", "")
+
             try:
-                profile_url = f"{api_url}/sessionserver/session/minecraft/profile/{uuid}"
+                api_base = api_url.rstrip('/')
+                profile_url = f"{api_base}/sessionserver/session/minecraft/profile/{clean_uuid}"
+
                 resp = requests.get(profile_url, timeout=3)
                 resp.raise_for_status()
                 data = resp.json()
 
                 skin_url = cls._extract_skin_url(data)
 
-                # 如果没有皮肤 (Steve/Alex)，尝试加载本地任意旧缓存，或者返回默认
                 if not skin_url:
-                    img = cls._get_default_steve()
-                    callback(img)
+                    callback(cls._get_default_steve())
                     return
 
-                # 3. 计算 Hash (通常是 URL 的最后一部分)
-                # 例如: http://.../texture/5f8c... -> 5f8c...
                 skin_hash = skin_url.split('/')[-1]
-
-                # 构造带 Hash 的缓存文件名
-                # 格式: {uuid}@{hash}.png
-                expected_filename = f"{uuid}@{skin_hash}.png"
+                expected_filename = f"{clean_uuid}@{skin_hash}.png"
                 expected_path = os.path.join(cls.CACHE_DIR, expected_filename)
 
-                # 4. 检查缓存
                 if os.path.exists(expected_path):
-                    # --- 命中缓存 ---
-                    # print(f"[Avatar] Cache Hit: {uuid}")
-                    img = Image.open(expected_path)
-                    callback(img)
                     return
 
-                # 5. 缓存未命中 (皮肤已更新 或 首次加载) -> 下载
-                # print(f"[Avatar] Downloading new skin: {uuid}")
-
+                # 下载
                 skin_resp = requests.get(skin_url, timeout=5)
                 skin_resp.raise_for_status()
+                skin_img = Image.open(io.BytesIO(skin_resp.content)).convert("RGBA")
 
-                # 处理图片
-                skin_bytes = io.BytesIO(skin_resp.content)
-                skin_img = Image.open(skin_bytes)
+                # --- 核心图像处理：差值放大法 (Hat Expansion) ---
 
-                # 裁剪头部 (8, 8) 到 (16, 16)
-                head_img = skin_img.crop((8, 8, 16, 16))
-                # 放大到 64x64 (使用邻近采样保持像素风)
-                head_img = head_img.resize((64, 64), Image.Resampling.NEAREST)
+                # 1. 裁剪原始像素 (8x8)
+                raw_head = skin_img.crop((8, 8, 16, 16))
+                raw_hat = skin_img.crop((40, 8, 48, 16))
 
-                # 保存新缓存
-                head_img.save(expected_path)
+                # 2. 差异化放大
+                # 头部放大 8 倍 (64x64)
+                head_big = raw_head.resize((cls.SCALE_HEAD * 8, cls.SCALE_HEAD * 8), Image.Resampling.NEAREST)
+                # 帽子放大 9 倍 (72x72) -> 这样帽子就有了物理厚度
+                hat_big = raw_hat.resize((cls.SCALE_HAT * 8, cls.SCALE_HAT * 8), Image.Resampling.NEAREST)
 
-                # 6. 清理该 UUID 的旧缓存 (删除 uuid@old_hash.png)
-                cls._clean_old_cache(uuid, skin_hash)
+                # 3. 添加光照渐变 (仅给脸部加，帽子保持原色更通透)
+                head_big = cls._add_lighting_gradient(head_big)
 
-                callback(head_img)
+                # 4. 制作投影 (基于大号帽子的投影)
+                # 投影也要有点偏移，让它投射在脸上
+                hat_a = hat_big.split()[3]
+                shadow_a = hat_a.point(lambda i: 60 if i > 0 else 0)  # 60透明度
+                shadow_rgb = Image.new("RGB", hat_big.size, (0, 0, 0))
+                shadow_layer = Image.merge("RGBA", (*shadow_rgb.split(), shadow_a))
 
-            except Exception as e:
-                # print(f"[Avatar] Network/Parse Error: {e}")
-                # 网络失败时，降级策略：查找本地是否有名为 {uuid}@*.png 的任何文件
-                fallback = cls._find_any_local_cache(uuid)
-                if fallback:
-                    callback(fallback)
-                else:
-                    callback(cls._get_default_steve())
+                # 5. 合成画布 (72x72)
+                # 创建全透明底图
+                final = Image.new("RGBA", (cls.CANVAS_SIZE, cls.CANVAS_SIZE), (0, 0, 0, 0))
 
-        except Exception as e:
-            # print(f"[Avatar] Fatal Error: {e}")
-            callback(None)
+                # 计算头部居中坐标: (72 - 64) / 2 = 4
+                offset = (cls.CANVAS_SIZE - head_big.width) // 2  # (4, 4)
+
+                # A. 贴头部 (居中)
+                final.paste(head_big, (offset, offset), head_big)
+
+                # B. 贴投影 (帽子层产生的阴影)
+                # 投影向右下偏移 4px
+                final = Image.alpha_composite(final, Image.new("RGBA", final.size).paste(shadow_layer, (4,
+                                                                                                        4)) or shadow_layer)  # 简化写法，直接覆盖
+                # 修正：上面写法比较绕，直接用 composite
+                # 创建一个跟final一样大的图层放阴影，阴影向右下偏移4px
+                shadow_canvas = Image.new("RGBA", final.size, (0, 0, 0, 0))
+                shadow_canvas.paste(shadow_layer, (4, 4))  # 阴影偏移
+                final = Image.alpha_composite(final, shadow_canvas)
+
+                # C. 贴帽子 (铺满 72x72)
+                final = Image.alpha_composite(final, hat_big)
+
+                final.save(expected_path)
+                cls._clean_old_cache(clean_uuid, skin_hash)
+
+                callback(final)
+
+            except Exception:
+                pass
+
+        except Exception:
+            pass
+
+    @staticmethod
+    def _add_lighting_gradient(img):
+        width, height = img.size
+        overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
+        for y in range(height):
+            factor = y / height
+            if factor < 0.5:
+                alpha = int((0.5 - factor) * 2 * 30)
+                draw.line([(0, y), (width, y)], fill=(255, 255, 255, alpha))
+            else:
+                alpha = int((factor - 0.5) * 2 * 60)
+                draw.line([(0, y), (width, y)], fill=(0, 0, 0, alpha))
+        return Image.alpha_composite(img, overlay)
 
     @staticmethod
     def _extract_skin_url(profile_json):
-        """从 Profile JSON 中解析 Base64 纹理"""
         try:
             properties = profile_json.get("properties", [])
             for prop in properties:
@@ -127,29 +155,47 @@ class AvatarManager:
 
     @classmethod
     def _clean_old_cache(cls, uuid, current_hash):
-        """删除同 UUID 但 Hash 不匹配的旧图片"""
         pattern = os.path.join(cls.CACHE_DIR, f"{uuid}@*.png")
         for f in glob.glob(pattern):
-            # 如果文件名里不包含当前的 hash，删掉
             if current_hash not in f:
                 try:
                     os.remove(f)
-                    # print(f"[Avatar] Cleaned old cache: {f}")
                 except:
                     pass
 
-    @classmethod
-    def _find_any_local_cache(cls, uuid):
-        """网络断开时，寻找本地该 UUID 的任意一张缓存"""
-        pattern = os.path.join(cls.CACHE_DIR, f"{uuid}@*.png")
-        files = glob.glob(pattern)
-        if files:
-            # 返回找到的第一张 (通常也是唯一一张)
-            return Image.open(files[0])
-        return None
-
     @staticmethod
     def _get_default_steve():
-        """生成一个灰色的默认头像"""
-        img = Image.new('RGB', (64, 64), color='#777777')
-        return img
+        # Steve 基础 (8x8)
+        base_color = (188, 134, 97)
+        hair_color = (60, 40, 40)
+        eye_white = (255, 255, 255)
+        eye_pupil = (73, 76, 176)
+        nose_color = (108, 66, 44)
+
+        img = Image.new('RGBA', (8, 8), color=base_color)
+        draw = ImageDraw.Draw(img)
+
+        draw.rectangle([(0, 0), (7, 1)], fill=hair_color)
+        draw.point((1, 3), fill=eye_white);
+        draw.point((2, 3), fill=eye_pupil)
+        draw.point((5, 3), fill=eye_white);
+        draw.point((6, 3), fill=eye_pupil)
+        draw.point((3, 4), fill=nose_color);
+        draw.point((4, 4), fill=nose_color)
+        draw.rectangle([(2, 5), (5, 5)], fill=nose_color)
+
+        # 放大头部到 64x64
+        head_big = img.resize((64, 64), Image.Resampling.NEAREST)
+        head_big = AvatarManager._add_lighting_gradient(head_big)
+
+        # 放置到 72x72 画布中心
+        final = Image.new("RGBA", (72, 72), (0, 0, 0, 0))
+        offset = (72 - 64) // 2
+        final.paste(head_big, (offset, offset))
+
+        # 给 Steve 加一个假的“头发层”阴影，假装有帽子
+        draw_shadow = ImageDraw.Draw(final)
+        # 额头阴影
+        draw_shadow.rectangle([(offset, offset + 16), (offset + 64, offset + 20)], fill=(0, 0, 0, 40))
+
+        return final
