@@ -9,6 +9,7 @@ from tkinter import messagebox
 
 from src import constants, authAPI, javaScanner
 from src.configMGR import config_mgr
+from src.avatarMGR import AvatarManager
 
 # ================= 1. 外观配置 =================
 ctk.set_appearance_mode("Dark")
@@ -38,25 +39,20 @@ class AccountCard(ctk.CTkFrame):
         self.name = auth_data.get("name", "Unknown")
         self.on_click = on_click
 
-        self.bind("<Button-1>", self._handle_click)
-        self.bind("<Button-3>", lambda e: on_right_click(e, self.uuid))
-
         self.grid_columnconfigure(1, weight=1)
 
-        # 1. 头像 (模拟)
+        # 1. 头像
         self.avatar = ctk.CTkLabel(
             self, text=self.name[0].upper(), width=32, height=32,
             fg_color="#555", corner_radius=4, font=("Arial", 16, "bold")
         )
         self.avatar.grid(row=0, column=0, rowspan=2, padx=(10, 8), pady=8)
-        self.avatar.bind("<Button-1>", self._handle_click)
 
         # 2. 名字
         self.name_lbl = ctk.CTkLabel(
             self, text=self.name, font=("Microsoft YaHei UI", 13, "bold"), anchor="w"
         )
         self.name_lbl.grid(row=0, column=1, sticky="sw", padx=(0, 10), pady=(6, 0))
-        self.name_lbl.bind("<Button-1>", self._handle_click)
 
         # 3. 来源
         api_name = auth_data.get("api_name", "认证账户")
@@ -64,14 +60,50 @@ class AccountCard(ctk.CTkFrame):
             self, text=api_name, font=("Microsoft YaHei UI", 11), text_color="gray", anchor="w"
         )
         self.source_lbl.grid(row=1, column=1, sticky="nw", padx=(0, 10), pady=(0, 6))
-        self.source_lbl.bind("<Button-1>", self._handle_click)
 
+        # --- 事件绑定修复 ---
+
+        # 内部函数：统一处理点击
+        def _left(e):
+            if self.on_click: self.on_click(self.uuid)
+
+        def _right(e):
+            if on_right_click: on_right_click(e, self.uuid)
+
+        # 1. 绑定 Frame 本身
+        self.bind("<Button-1>", _left)
+        self.bind("<Button-3>", _right)  # Win/Linux 右键
+        self.bind("<Button-2>", _right)  # macOS 右键
+
+        # 2. 【关键】绑定所有子控件 (Label)
+        # 否则点在文字上没反应
+        for widget in self.winfo_children():
+            widget.bind("<Button-1>", _left)
+            widget.bind("<Button-3>", _right)
+            widget.bind("<Button-2>", _right)
+
+            # 顺便修复悬停判定：子控件也要触发悬停逻辑
+            if not is_selected:
+                widget.bind("<Enter>", self._on_enter)
+                widget.bind("<Leave>", self._on_leave)
+
+        # Frame 本身的悬停
         if not is_selected:
-            self.bind("<Enter>", lambda e: self.configure(fg_color=COLOR_CARD_HOVER))
-            self.bind("<Leave>", lambda e: self.configure(fg_color="transparent"))
+            self.bind("<Enter>", self._on_enter)
+            self.bind("<Leave>", self._on_leave)
 
-    def _handle_click(self, event):
-        if self.on_click: self.on_click(self.uuid)
+    def _on_enter(self, event):
+        self.configure(fg_color=COLOR_CARD_HOVER)
+
+    def _on_leave(self, event):
+        # 严格判定：只有鼠标真的移出了 Frame 矩形范围才重置颜色
+        x, y = self.winfo_pointerx(), self.winfo_pointery()
+        widget_x, widget_y = self.winfo_rootx(), self.winfo_rooty()
+        width, height = self.winfo_width(), self.winfo_height()
+
+        if widget_x <= x <= widget_x + width and widget_y <= y <= widget_y + height:
+            return
+        self.configure(fg_color="transparent")
 
 
 class ModernWizard(ctk.CTk):
@@ -80,8 +112,28 @@ class ModernWizard(ctk.CTk):
         self.setup_success = False
 
         self.title(f"{constants.PROXY_NAME} 配置向导")
-        self.geometry("820x500")
+        # --- 窗口居中 & 置顶 (修复) ---
+        w, h = 820, 500
         self.minsize(800, 500)
+
+        # 获取屏幕宽高
+        ws = self.winfo_screenwidth()
+        hs = self.winfo_screenheight()
+
+        # 计算居中坐标 (X和Y都居中)
+        x = int((ws - w) / 2)
+        y = int((hs - h) / 2)
+
+        self.geometry(f"{w}x{h}+{x}+{y}")
+
+        # 【关键修复】强制将窗口置于所有窗口的最顶层 (Z轴)
+        self.attributes("-topmost", True)
+
+        # 可选：为了不影响后续切换窗口，可以在 1秒后取消强制置顶，或者就这样保留
+        self.after(1000, lambda: self.attributes("-topmost", False))
+
+        self.lift()  # 提升窗口层级
+        self.focus_force()  # 强制获取焦点
 
         config_mgr.load()
         self.current_auth_data = None
@@ -134,7 +186,7 @@ class ModernWizard(ctk.CTk):
 
         # 底部启动区
         self.launch_area = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        self.launch_area.grid(row=2, column=0, sticky="ew", padx=15, pady=20)
+        self.launch_area.grid(row=2, column=0, sticky="ew", padx=15, pady=(37, 20))
         self.launch_area.bind("<MouseWheel>", _scroll_handler)  # 底部区域也支持滚轮
 
         self.launch_btn = ctk.CTkButton(
@@ -315,7 +367,6 @@ class ModernWizard(ctk.CTk):
     def _copy_uuid(self, uuid):
         self.clipboard_clear()
         self.clipboard_append(uuid)
-        messagebox.showinfo("提示", "UUID 已复制")
 
     def _del_account(self, uuid):
         if messagebox.askyesno("确认", "确定删除该账号吗？"):
