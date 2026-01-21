@@ -22,7 +22,9 @@ COLOR_CARD_SELECT = "#4a4a4a"  # 列表项选中
 COLOR_ACCENT = "#E09F5E"  # 启动按钮橙色
 COLOR_ACCENT_HOVER = "#D08E4C"
 COLOR_TEXT_GRAY = "#AAAAAA"  # 灰色文字
-COLOR_TEXT_DIM = "#888888"  # 更暗的提示文字
+COLOR_TEXT_DIM = "#777777"  # 更暗的提示文字
+COLOR_BTN_GRAY = "#444444"  # 通用灰色按钮
+COLOR_BTN_GRAY_HOVER = "#555555"
 
 
 class AccountCard(ctk.CTkFrame):
@@ -78,8 +80,7 @@ class ModernWizard(ctk.CTk):
         self.setup_success = False
 
         self.title(f"{constants.PROXY_NAME} 配置向导")
-        # 设置默认大小为最小尺寸 (紧凑模式)
-        self.geometry("800x500")
+        self.geometry("820x500")
         self.minsize(800, 500)
 
         config_mgr.load()
@@ -108,12 +109,20 @@ class ModernWizard(ctk.CTk):
         self.sidebar.grid(row=0, column=0, sticky="nsew")
         self.sidebar.grid_rowconfigure(1, weight=1)
 
-        # 标题
-        ctk.CTkLabel(
-            self.sidebar, text="账户", font=("Microsoft YaHei UI", 16, "bold"), anchor="w"
-        ).grid(row=0, column=0, sticky="ew", padx=20, pady=(25, 10))
+        # 滚轮事件绑定辅助函数 (绑定整个 Sidebar 区域)
+        def _scroll_handler(event):
+            self.scroll_frame._parent_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
-        # 列表 (隐藏滚动条样式但保留功能)
+        self.sidebar.bind("<MouseWheel>", _scroll_handler)
+
+        # 标题
+        title_lbl = ctk.CTkLabel(
+            self.sidebar, text="账户", font=("Microsoft YaHei UI", 16, "bold"), anchor="w"
+        )
+        title_lbl.grid(row=0, column=0, sticky="ew", padx=20, pady=(25, 10))
+        title_lbl.bind("<MouseWheel>", _scroll_handler)  # 标题也支持滚轮
+
+        # 列表
         self.scroll_frame = ctk.CTkScrollableFrame(
             self.sidebar,
             fg_color="transparent",
@@ -126,6 +135,7 @@ class ModernWizard(ctk.CTk):
         # 底部启动区
         self.launch_area = ctk.CTkFrame(self.sidebar, fg_color="transparent")
         self.launch_area.grid(row=2, column=0, sticky="ew", padx=15, pady=20)
+        self.launch_area.bind("<MouseWheel>", _scroll_handler)  # 底部区域也支持滚轮
 
         self.launch_btn = ctk.CTkButton(
             self.launch_area,
@@ -145,8 +155,9 @@ class ModernWizard(ctk.CTk):
         self.main = ctk.CTkFrame(self, corner_radius=0, fg_color=COLOR_MAIN)
         self.main.grid(row=0, column=1, sticky="nsew")
 
-        # 顶部留白
-        ctk.CTkFrame(self.main, height=20, fg_color="transparent").pack()
+        # 顶部留白 (调整此处高度以对齐左侧“账户”标题)
+        # 左侧“账户”是 pady=(25, 10)，这里设为 25 左右可以 visually aligned
+        ctk.CTkFrame(self.main, height=25, fg_color="transparent").pack()
 
         # --- 1. Java 环境板块 ---
         self._create_section_container("Java 运行环境")
@@ -155,16 +166,23 @@ class ModernWizard(ctk.CTk):
         java_row.pack(fill="x", pady=(5, 0))
 
         self.java_var = tkinter.StringVar(value=config_mgr.get_real_java_path() or "")
+
+        # Java 下拉框
         self.java_combo = ctk.CTkComboBox(
-            java_row, variable=self.java_var, width=400, height=32,
+            java_row, variable=self.java_var, height=32,
             values=["正在扫描..."]
         )
-        self.java_combo.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self.java_combo.pack(side="left", fill="x", expand=True)  # expand=True 占满剩余
 
+        # 占位符 (间距)
+        ctk.CTkFrame(java_row, width=10, height=1, fg_color="transparent").pack(side="left")
+
+        # 浏览按钮 (固定宽度 80，与下方的 +/- 组合对齐)
         ctk.CTkButton(
-            java_row, text="浏览", width=60, height=32, fg_color="#444", hover_color="#555",
+            java_row, text="浏览", width=80, height=32,
+            fg_color=COLOR_BTN_GRAY, hover_color=COLOR_BTN_GRAY_HOVER,
             command=self._browse_java
-        ).pack(side="right")
+        ).pack(side="left")
 
         # --- 2. 认证服务器板块 ---
         self._create_section_container("认证服务器 (API)")
@@ -172,73 +190,86 @@ class ModernWizard(ctk.CTk):
         api_row = ctk.CTkFrame(self.current_section, fg_color="transparent")
         api_row.pack(fill="x", pady=(5, 0))
 
-        # API 选择框 (可编辑)
+        # API 下拉框
         self.api_combo = ctk.CTkComboBox(
-            api_row, width=300, height=32,
+            api_row, height=32,
             command=self._on_api_change
         )
-        self.api_combo.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self.api_combo.pack(side="left", fill="x", expand=True)
 
-        # 新增按钮 (恢复 + 号)
+        # 占位符 (间距)
+        ctk.CTkFrame(api_row, width=10, height=1, fg_color="transparent").pack(side="left")
+
+        # 按钮容器 (总宽 80)
+        # + 按钮 (宽 35)
         ctk.CTkButton(
-            api_row, text="+", width=40, height=32,
-            fg_color="#444", hover_color="#555",
+            api_row, text="+", width=35, height=32,
+            fg_color=COLOR_BTN_GRAY, hover_color=COLOR_BTN_GRAY_HOVER,
+            font=("Arial", 16),
             command=self._save_custom_api_from_input
-        ).pack(side="left", padx=(0, 8))
+        ).pack(side="left")
 
-        # 删除按钮
+        # 按钮间距 (宽 10)
+        ctk.CTkFrame(api_row, width=10, height=1, fg_color="transparent").pack(side="left")
+
+        # - 按钮 (宽 35)
         ctk.CTkButton(
-            api_row, text="-", width=40, height=32,
+            api_row, text="-", width=35, height=32,
             fg_color="#8B0000", hover_color="#B00000",
+            font=("Arial", 16),
             command=self._del_api
-        ).pack(side="right")
+        ).pack(side="left")
 
-        # 提示语
-        ctk.CTkLabel(
-            self.current_section, text="* 输入 URL 后点击 + 号保存，或回车直接保存",
-            font=("Arial", 10), text_color=COLOR_TEXT_DIM
-        ).pack(anchor="w", pady=(5, 0))
-
-        # --- 3. 登录板块 (紧凑布局) ---
+        # --- 3. 登录板块 ---
         self._create_section_container("登录新账号")
 
         # 邮箱
         ctk.CTkLabel(
             self.current_section, text="邮箱 / 用户名:",
-            font=("Microsoft YaHei UI", 12), text_color=COLOR_TEXT_GRAY
-        ).pack(anchor="w", pady=(5, 2))
+            font=("Microsoft YaHei UI", 10), text_color=COLOR_TEXT_GRAY
+        ).pack(anchor="w", pady=(3, 1))
 
         self.email_entry = ctk.CTkComboBox(
             self.current_section, height=32,
             values=config_mgr.get_history_users()
         )
-        self.email_entry.pack(fill="x", pady=(0, 4))  # [修改] 间距极小
+        self.email_entry.pack(fill="x", pady=(0, 4))
 
         # 密码
         ctk.CTkLabel(
             self.current_section, text="密码:",
-            font=("Microsoft YaHei UI", 12), text_color=COLOR_TEXT_GRAY
-        ).pack(anchor="w", pady=(0, 2))
+            font=("Microsoft YaHei UI", 10), text_color=COLOR_TEXT_GRAY
+        ).pack(anchor="w", pady=(0, 1))
 
         self.pwd_entry = ctk.CTkEntry(self.current_section, height=32, show="•")
-        self.pwd_entry.pack(fill="x", pady=(0, 10))  # [修改] 与按钮的间距减小
+        self.pwd_entry.pack(fill="x", pady=(0, 2))
 
-        # 验证按钮
+        # 密码提示语
+        ctk.CTkLabel(
+            self.current_section, text="* YggdrasilProxy 不会记录您的密码",
+            font=("Microsoft YaHei UI", 10), text_color=COLOR_TEXT_DIM
+        ).pack(anchor="w", pady=(0, 0))
+
+        # --- 底部验证按钮 ---
+        # 放在 main 的最底部，与左侧 Launch 按钮对齐
+        # 左侧 Padding 是 (15, 20)，这里我们也给类似的 Padding
+        bottom_area = ctk.CTkFrame(self.main, fg_color="transparent")
+        bottom_area.pack(fill="x", padx=30, pady=(0, 53), side="bottom")
+
         self.login_btn = ctk.CTkButton(
-            self.current_section, text="验证并添加", height=38,
-            font=("Microsoft YaHei UI", 13, "bold"),
+            bottom_area, text="验证并添加", height=45,  # 高度与启动按钮一致
+            font=("Microsoft YaHei UI", 14, "bold"),
             command=self._on_verify
         )
-        self.login_btn.pack(fill="x", pady=(0, 5))
+        self.login_btn.pack(fill="x")
 
         # 初始化数据
         self._refresh_api_ui()
-        # 绑定回车保存 API
         self.api_combo.bind("<Return>", lambda e: self._save_custom_api_from_input())
 
     def _create_section_container(self, title):
         container = ctk.CTkFrame(self.main, fg_color="transparent")
-        container.pack(fill="x", padx=30, pady=(0, 25))
+        container.pack(fill="x", padx=30, pady=(0, 20))  # 减小板块间距
 
         ctk.CTkLabel(
             container, text=title,
@@ -259,8 +290,13 @@ class ModernWizard(ctk.CTk):
         for acc in accounts:
             is_sel = (acc["uuid"] == default_uuid)
             if is_sel: self.current_auth_data = acc
-            AccountCard(self.scroll_frame, acc, is_sel, self._select_account, self._show_context_menu).pack(fill="x",
-                                                                                                            pady=2)
+            AccountCard(
+                self.scroll_frame,
+                acc,
+                is_sel,
+                self._select_account,
+                self._show_context_menu
+            ).pack(fill="x", pady=2, padx=(10, 0))
 
         if not self.current_auth_data and accounts:
             self._select_account(accounts[0]["uuid"])
@@ -383,9 +419,7 @@ class ModernWizard(ctk.CTk):
         if not profiles:
             return messagebox.showerror("错误", "该账号没有游戏角色")
 
-        # 获取当前 API 名称简写
         api_cfg = config_mgr.get_current_api_config()
-        # 尝试只取括号前或域名的部分，让显示短一点
         api_name_short = api_cfg["name"]
         if "(" in api_name_short:
             api_name_short = api_name_short.split('(')[0].strip()
