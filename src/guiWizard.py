@@ -129,12 +129,27 @@ class AccountCard(ctk.CTkFrame):
         AvatarManager.get_avatar(self.uuid, api_url, self._on_avatar_updated)
 
     def _on_avatar_updated(self, pil_img):
-        """只有当下载到了更新的皮肤时，才会回调这里"""
-        if pil_img and self.winfo_exists():
-            try:
-                self.after(0, lambda: self._apply_avatar(pil_img))
-            except:
-                pass
+        if not pil_img:
+            return
+        # 第一层保险：Card 已经不存在
+        if not self.winfo_exists():
+            return
+        try:
+            # 丢给主线程，真正更新放到 UI 线程
+            self.after(0, lambda img=pil_img: self._safe_apply_avatar(img))
+        except RuntimeError:
+            # after 调用时窗口已经被销毁
+            pass
+
+    def _safe_apply_avatar(self, pil_img):
+        # 第二层保险：after 执行时再次确认
+        if not self.winfo_exists():
+            return
+        try:
+            self._apply_avatar(pil_img)
+        except RuntimeError:
+            # Tk 已关闭 / Widget 已回收
+            pass
 
     def _apply_avatar(self, pil_img):
         if not self.winfo_exists(): return

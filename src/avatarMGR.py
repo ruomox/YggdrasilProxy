@@ -7,6 +7,7 @@ import json
 import io
 import glob
 from PIL import Image, ImageDraw
+from src import constants
 from src.configMGR import config_mgr
 
 
@@ -62,6 +63,11 @@ class AvatarManager:
                 expected_path = os.path.join(cls.CACHE_DIR, expected_filename)
 
                 if os.path.exists(expected_path):
+                    try:
+                        img = Image.open(expected_path)
+                        callback(img)
+                    except:
+                        callback(cls._get_default_steve())
                     return
 
                 # 下载
@@ -71,59 +77,76 @@ class AvatarManager:
 
                 # --- 核心图像处理：差值放大法 (Hat Expansion) ---
 
+                # 0. 判断皮肤尺寸（是否有帽子层）
+                w, h = skin_img.size
+                has_hat = h >= 64
+
                 # 1. 裁剪原始像素 (8x8)
                 raw_head = skin_img.crop((8, 8, 16, 16))
-                raw_hat = skin_img.crop((40, 8, 48, 16))
+                raw_hat = skin_img.crop((40, 8, 48, 16)) if has_hat else None
 
                 # 2. 差异化放大
                 # 头部放大 8 倍 (64x64)
-                head_big = raw_head.resize((cls.SCALE_HEAD * 8, cls.SCALE_HEAD * 8), Image.Resampling.NEAREST)
-                # 帽子放大 9 倍 (72x72) -> 这样帽子就有了物理厚度
-                hat_big = raw_hat.resize((cls.SCALE_HAT * 8, cls.SCALE_HAT * 8), Image.Resampling.NEAREST)
+                head_big = raw_head.resize(
+                    (cls.SCALE_HEAD * 8, cls.SCALE_HEAD * 8),
+                    Image.Resampling.NEAREST
+                )
 
-                # 3. 添加光照渐变 (仅给脸部加，帽子保持原色更通透)
+                # 3. 添加光照渐变（仅头部）
                 head_big = cls._add_lighting_gradient(head_big)
 
-                # 4. 制作投影 (基于大号帽子的投影)
-                # 投影也要有点偏移，让它投射在脸上
-                hat_a = hat_big.split()[3]
-                shadow_a = hat_a.point(lambda i: 60 if i > 0 else 0)  # 60透明度
-                shadow_rgb = Image.new("RGB", hat_big.size, (0, 0, 0))
-                shadow_layer = Image.merge("RGBA", (*shadow_rgb.split(), shadow_a))
+                # 4. 合成画布 (72x72)
+                final = Image.new(
+                    "RGBA",
+                    (cls.CANVAS_SIZE, cls.CANVAS_SIZE),
+                    (0, 0, 0, 0)
+                )
 
-                # 5. 合成画布 (72x72)
-                # 创建全透明底图
-                final = Image.new("RGBA", (cls.CANVAS_SIZE, cls.CANVAS_SIZE), (0, 0, 0, 0))
+                # 计算头部居中坐标
+                offset = (cls.CANVAS_SIZE - head_big.width) // 2
 
-                # 计算头部居中坐标: (72 - 64) / 2 = 4
-                offset = (cls.CANVAS_SIZE - head_big.width) // 2  # (4, 4)
-
-                # A. 贴头部 (居中)
+                # A. 贴头部
                 final.paste(head_big, (offset, offset), head_big)
 
-                # B. 贴投影 (帽子层产生的阴影)
-                # 投影向右下偏移 4px
-                final = Image.alpha_composite(final, Image.new("RGBA", final.size).paste(shadow_layer, (4,
-                                                                                                        4)) or shadow_layer)  # 简化写法，直接覆盖
-                # 修正：上面写法比较绕，直接用 composite
-                # 创建一个跟final一样大的图层放阴影，阴影向右下偏移4px
-                shadow_canvas = Image.new("RGBA", final.size, (0, 0, 0, 0))
-                shadow_canvas.paste(shadow_layer, (4, 4))  # 阴影偏移
-                final = Image.alpha_composite(final, shadow_canvas)
+                # ===== 以下所有逻辑仅在有帽子层时执行 =====
+                if raw_hat:
+                    # 帽子放大 9 倍 (72x72)
+                    hat_big = raw_hat.resize(
+                        (cls.SCALE_HAT * 8, cls.SCALE_HAT * 8),
+                        Image.Resampling.NEAREST
+                    )
 
-                # C. 贴帽子 (铺满 72x72)
-                final = Image.alpha_composite(final, hat_big)
+                    # 尺寸保险（防未来改倍率炸）
+                    if hat_big.size != final.size:
+                        hat_big = hat_big.resize(final.size, Image.Resampling.NEAREST)
 
+                    # B. 制作投影
+                    hat_a = hat_big.split()[3]
+                    shadow_a = hat_a.point(lambda i: 60 if i > 0 else 0)
+                    shadow_rgb = Image.new("RGB", hat_big.size, (0, 0, 0))
+                    shadow_layer = Image.merge("RGBA", (*shadow_rgb.split(), shadow_a))
+
+                    shadow_canvas = Image.new("RGBA", final.size, (0, 0, 0, 0))
+                    shadow_canvas.paste(shadow_layer, (4, 4))
+                    final = Image.alpha_composite(final, shadow_canvas)
+
+                    # C. 贴帽子
+                    final = Image.alpha_composite(final, hat_big)
+
+                # 5. 保存与回调
                 final.save(expected_path)
                 cls._clean_old_cache(clean_uuid, skin_hash)
-
                 callback(final)
 
-            except Exception:
-                pass
 
-        except Exception:
-            pass
+            except Exception as e:
+                if constants.DEBUG_MODE:
+                    print("[AvatarMGR]", e)
+
+
+        except Exception as e:
+            if constants.DEBUG_MODE:
+                print("[AvatarMGR]", e)
 
     @staticmethod
     def _add_lighting_gradient(img):

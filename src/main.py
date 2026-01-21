@@ -216,7 +216,7 @@ def main():
     if "--yggpro" in captured_game_args:
         force_config_mode = True
         # 再次清洗，确保不传给游戏
-        captured_game_args = [arg for arg in captured_game_args if arg not in "--yggpro"]
+        captured_game_args = [arg for arg in captured_game_args if arg not in ("--yggpro", "--yggprodebug")]
 
     # [3] versionType 统一修正
     new_game_args = []
