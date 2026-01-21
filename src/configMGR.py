@@ -36,6 +36,7 @@ class ConfigManager:
             "real_java_path": None,
             "accounts": {},
             "instance_map": {},
+            "instance_java": {},
             "login_history": [],
             "default_account_uuid": None,  # 仍保留作为 GUI 选中的临时存储
             "api_list": constants.DEFAULT_API_LIST,
@@ -105,6 +106,7 @@ class ConfigManager:
                     if "accounts" in raw_data: self._config_data["accounts"] = raw_data["accounts"]
                     if "instance_map" in raw_data: self._config_data["instance_map"] = raw_data["instance_map"]
                     if "login_history" in raw_data: self._config_data["login_history"] = raw_data["login_history"]
+                    if "instance_java" in raw_data: self._config_data["instance_java"] = raw_data["instance_java"]
 
                     for k, v in raw_data.items():
                         if k not in ["accounts", "instance_map", "login_history"]:
@@ -216,6 +218,42 @@ class ConfigManager:
                 self._config_data["instance_map"] = {}
 
             self._config_data["instance_map"][norm_path] = uuid
+            self.save()
+
+    def get_java_for_instance(self, game_dir):
+        """
+        [新增] 获取指定实例绑定的 Java 路径。
+        如果该实例未绑定特定 Java，则返回全局默认的 real_java_path。
+        """
+        with self._lock:
+            # 1. 尝试获取实例专属绑定
+            if game_dir:
+                norm_path = self._normalize_path(game_dir)
+                bound_java = self._config_data.get("instance_java", {}).get(norm_path)
+                if bound_java and os.path.exists(bound_java):
+                    return bound_java
+
+            # 2. 回退到全局设置
+            return self._config_data.get("real_java_path")
+
+    def set_instance_java_binding(self, game_dir, java_path):
+        """
+        [新增] 将特定 Java 路径绑定到指定游戏实例
+        """
+        with self._lock:
+            if not game_dir or not java_path: return
+
+            norm_path = self._normalize_path(game_dir)
+
+            if "instance_java" not in self._config_data:
+                self._config_data["instance_java"] = {}
+
+            self._config_data["instance_java"][norm_path] = java_path
+
+            # 同时更新全局默认，为了方便下次 GUI 打开时也是这个
+            # 用于最大程度避免 sniffer 产生 java 版本过高的提示
+            self._config_data["real_java_path"] = java_path
+
             self.save()
 
     # --- Getters/Setters ---

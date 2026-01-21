@@ -160,9 +160,10 @@ class AccountCard(ctk.CTkFrame):
 
 
 class ModernWizard(ctk.CTk):
-    def __init__(self, force_show=False):
+    def __init__(self, force_show=False, game_dir=None):
         super().__init__()
         self.setup_success = False
+        self.game_dir = game_dir  # 【新增】保存实例路径
 
         self.title(f"{constants.PROXY_NAME} 配置向导")
         # --- 窗口居中 & 置顶 (修复) ---
@@ -723,7 +724,13 @@ class ModernWizard(ctk.CTk):
 
         if not final_path: return messagebox.showwarning("提示", "Java 路径为空")
 
-        config_mgr.set_real_java_path(final_path)
+        # 如果传入了游戏目录，则进行绑定；否则只设置全局默认
+        if self.game_dir:
+            # 这一步会同时更新 global real_java_path (取决于你在 configMGR 里的实现)
+            config_mgr.set_instance_java_binding(self.game_dir, final_path)
+            print(f"Java bound to instance: {self.game_dir}")
+        else:
+            config_mgr.set_real_java_path(final_path)
 
         # 4. Token 刷新逻辑 (保持不变)
         api = config_mgr.get_current_api_config()
@@ -751,6 +758,6 @@ class ModernWizard(ctk.CTk):
         return self.setup_success
 
 
-def show_wizard(force_show_settings=False):
-    app = ModernWizard(force_show_settings)
+def show_wizard(force_show_settings=False, game_dir=None):
+    app = ModernWizard(force_show_settings, game_dir=game_dir)
     return app.run()

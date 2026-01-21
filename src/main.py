@@ -134,7 +134,7 @@ def ensure_account_valid(game_dir, force_gui=False):
 
     if need_gui:
         print(f"[{constants.PROXY_NAME}] Opening GUI...", file=sys.stderr)
-        if not guiWizard.show_wizard(force_show_settings=force_gui): return None
+        if not guiWizard.show_wizard(force_show_settings=force_gui, game_dir=game_dir): return None
 
         config_mgr.load()
         # 获取用户在 GUI 里刚刚选中的账号 (暂存在 default)
@@ -167,16 +167,20 @@ def main():
     force_config_mode = ("--yggpro" in sys_args)
 
     # [第1层] 入口清洗：物理删除参数，确保后续 JVM 调用（如嗅探器）绝对安全
-    raw_args = [arg for arg in sys_args if arg not in ("--yggpro")]
+    raw_args = [arg for arg in sys_args if arg not in ("--yggpro", "--yggprodebug")]
 
     config_mgr.load()
     tool_java = runtimeMGR.get_fallback_java()
-    if not tool_java: sys.exit(1)
     target_java = config_mgr.get_real_java_path()
+    if not target_java and not tool_java:
+        print(f"[{constants.PROXY_NAME}] No usable Java found.", file=sys.stderr)
+        sys.exit(1)
     if not target_java or not os.path.exists(target_java):
         c = javaScanner.find_java_candidates()
-        if c: target_java = c[0]; config_mgr.set_real_java_path(target_java); config_mgr.save()
+        if c: target_java = c[0]["path"]; config_mgr.set_real_java_path(target_java); config_mgr.save()
     if not target_java: target_java = tool_java
+
+    sniffer_java = tool_java if tool_java else target_java
 
     if not raw_args:
         subprocess.call([target_java]);
@@ -192,7 +196,7 @@ def main():
         sys.exit(subprocess.call([target_java] + raw_args))
 
     elif launch_type == "WRAPPER":
-        captured_game_args = run_trap_sniffer(tool_java, raw_args)
+        captured_game_args = run_trap_sniffer(sniffer_java, raw_args)
 
         found_wrapper = False
         for arg in raw_args:
@@ -206,7 +210,7 @@ def main():
         jvm_args_prefix.append(constants.REAL_MINECRAFT_MAIN)
 
     elif launch_type == "STANDARD":
-        captured_game_args = run_standard_sniffer(tool_java, raw_args)
+        captured_game_args = run_standard_sniffer(sniffer_java, raw_args)
         jvm_args_prefix = []
 
     if not captured_game_args:
@@ -255,11 +259,23 @@ def main():
     auth_data = ensure_account_valid(game_dir, force_gui=force_config_mode)
     if not auth_data: sys.exit(1)
 
+    # === 实际启动 Java 选择链：instance -> target -> tool ===
+    instance_java = config_mgr.get_java_for_instance(game_dir)
+    launch_java = (
+        instance_java if instance_java and os.path.exists(instance_java)
+        else target_java if target_java and os.path.exists(target_java)
+        else tool_java
+    )
+
+    if not launch_java:
+        print(f"[{constants.PROXY_NAME}] No usable Java for launch.", file=sys.stderr)
+        sys.exit(1)
+
     # [5] 组装
     injector = runtimeMGR.get_injector_jar()
     api = config_mgr.get_current_api_config()
 
-    final_cmd = [target_java]
+    final_cmd = [launch_java]
     final_cmd.append(f"-javaagent:{injector}={api['base_url']}")
     final_cmd.append("-Dauthlibinjector.noShowServerName")
 
