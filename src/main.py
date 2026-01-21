@@ -151,7 +151,23 @@ def ensure_account_valid(game_dir, force_gui=False):
 # ================= 4. 主入口 =================
 
 def main():
-    raw_args = sys.argv[1:]
+    sys_args = sys.argv[1:]
+
+    # ===================== DEBUG: 原始入口 =====================
+    if constants.DEBUG_MODE:
+        print("\n" + "=" * 60, file=sys.stderr)
+        print("[YggProxy DEBUG] Raw sys.argv =", file=sys.stderr)
+        for i, a in enumerate(sys.argv):
+            print(f"  argv[{i}] = {a}", file=sys.stderr)
+        print("=" * 60 + "\n", file=sys.stderr)
+    # ===================== DEBUG: 原始入口 =====================
+
+    # [第2层] 状态记录：检测用户意图
+    # 兼容旧参数名以防万一，统一逻辑状态
+    force_config_mode = ("--yggpro" in sys_args)
+
+    # [第1层] 入口清洗：物理删除参数，确保后续 JVM 调用（如嗅探器）绝对安全
+    raw_args = [arg for arg in sys_args if arg not in ("--yggpro")]
 
     config_mgr.load()
     tool_java = runtimeMGR.get_fallback_java()
@@ -196,9 +212,15 @@ def main():
     if not captured_game_args:
         sys.exit(subprocess.call([target_java] + raw_args))
 
+    # [补充清洗] 检查解包后的参数（针对 @argfile 或 Wrapper 隐藏参数的情况）
+    if "--yggpro" in captured_game_args or "--yggproconfig" in captured_game_args:
+        force_config_mode = True
+        # 再次清洗，确保不传给游戏
+        captured_game_args = [arg for arg in captured_game_args if arg not in ("--yggpro", "--yggproconfig")]
+
     # [2] 账号
     game_dir = get_game_dir(captured_game_args)
-    auth_data = ensure_account_valid(game_dir)
+    auth_data = ensure_account_valid(game_dir, force_gui=force_config_mode)
     if not auth_data: sys.exit(1)
 
     # [3] 组装
@@ -211,7 +233,7 @@ def main():
     if jvm_args_prefix:
         final_cmd.extend(jvm_args_prefix)
 
-    sensitive = {"--username", "--uuid", "--accessToken", "--userProperties"}
+    sensitive = {"--username", "--uuid", "--accessToken", "--userProperties", "--yggpro"}
     skip = False
 
     for arg in captured_game_args:
@@ -236,6 +258,15 @@ def main():
     ])
 
     print(f"[{constants.PROXY_NAME}] Launching: {auth_data['name']}", file=sys.stderr)
+
+    # ===================== DEBUG: 最终传递 =====================
+    if constants.DEBUG_MODE:
+        print("\n" + "=" * 60, file=sys.stderr)
+        print("[YggProxy DEBUG] Final sys.argv:", file=sys.stderr)
+        for i, a in enumerate(final_cmd):
+            print(f"  final_cmd[{i}] = {a}", file=sys.stderr)
+        print("=" * 60 + "\n", file=sys.stderr)
+    # ===================== DEBUG: 最终传递 =====================
 
     try:
         if platform.system() == "Windows":

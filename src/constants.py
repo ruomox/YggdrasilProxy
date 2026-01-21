@@ -55,3 +55,6 @@ KNOWN_GAME_MAINS = [
 
 # 最终要调用的真实游戏主类 (用于替换 Wrapper)
 REAL_MINECRAFT_MAIN = "net.minecraft.client.main.Main"
+
+# ================= 调试开关 =================
+DEBUG_MODE = False
