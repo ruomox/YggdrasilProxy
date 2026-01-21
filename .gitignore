@@ -1,11 +1,11 @@
 .idea
-assets/YggProJRE.zip
-assets/authlib-injector.jar
-AGENTS.md
-GEMINI.md
+.YggProxy
 build
 dist
 test
+assets
 *.spec
 net
-TODO&NOTE.md
+*.md
+!README.md
+!assets/fMcMain.jar

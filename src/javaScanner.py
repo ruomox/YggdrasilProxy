@@ -134,13 +134,51 @@ def _scan_paths_fast():
 
     return {p for p in candidates if _is_executable(p)}
 
+# 专门扫描相对路径下的内嵌 Java
+def _scan_local_runtime():
+    # 1. 动态计算项目根目录 (这就实现了"相对路径")
+    if getattr(sys, 'frozen', False):
+        # 打包后：exe 所在目录
+        base_dir = os.path.dirname(sys.executable)
+    else:
+        # 源码运行：src 的上上级 (项目根目录)
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    # 2. 拼接相对路径：根目录/dist/.YggProxy/YggProRuntime
+    # 只要你的 dist 文件夹跟着程序走，这就永远能找到
+    target_dir = os.path.join(base_dir, ".YggProxy", "YggProRuntime")
+
+    found_paths = set()
+
+    # 3. 只有当目录存在 且 常量开关开启 时才扫描
+    if getattr(constants, "ENABLE_LOCAL_JAVA", False) and os.path.exists(target_dir):
+        exe_name = _get_java_exe_name()
+        # 递归遍历 (os.walk 能穿透层级找到 bin/java)
+        for root, dirs, files in os.walk(target_dir):
+            if exe_name in files:
+                full_path = os.path.join(root, exe_name)
+                # 顺手修复 Mac 权限 (必做)
+                if platform.system() != "Windows":
+                    try:
+                        os.chmod(full_path, 0o755)
+                    except:
+                        pass
+                found_paths.add(full_path)
+
+    return found_paths
 
 def find_java_candidates():
     """
     [修改] 返回详细信息列表
     """
     raw_paths = _scan_paths_fast()
-    filtered = [p for p in raw_paths if constants.DATA_DIR_NAME not in p]
+    filtered = list(raw_paths)
+
+    # 这里的 paths 是根据当前程序位置动态算出来的
+    local_paths = _scan_local_runtime()
+    for lp in local_paths:
+        if lp not in filtered:
+            filtered.insert(0, lp)  # 插到最前面
 
     valid_infos = []
 

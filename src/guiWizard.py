@@ -601,8 +601,14 @@ class ModernWizard(ctk.CTk):
 
         for info in infos:
             path = info["path"]
-            # 【修改点】构造长名字：版本 (架构) - 路径
-            long_display = f"Java {info['version']} ({info['arch']}) - {path}"
+            # 检测路径中是否包含 .YggProxy (或者 constants.DATA_DIR_NAME)
+            # 只要包含这个关键字，就认为是内嵌版，隐藏长路径
+            if constants.DATA_DIR_NAME in path or ".YggProxy" in path:
+                suffix = "[YggdrasilProxy 内嵌]"
+            else:
+                suffix = path
+            # 构造长名字：版本 (架构) - 路径
+            long_display = f"Java {info['version']} ({info['arch']}) - {suffix}"
 
             self.java_map[long_display] = info
             display_list.append(long_display)
@@ -615,8 +621,13 @@ class ModernWizard(ctk.CTk):
             manual_info = javaScanner.get_java_info(current_path)
             if not manual_info:
                 manual_info = {"path": current_path, "version": "?", "arch": "?"}
+            # 对 Config 里的路径也做同样的判断
+            if constants.DATA_DIR_NAME in current_path or ".YggProxy" in current_path:
+                suf = "[YggdrasilProxy 内嵌]"
+            else:
+                suf = current_path
 
-            long_display = f"Java {manual_info['version']} ({manual_info['arch']}) - {current_path}"
+            long_display = f"Java {manual_info['version']} ({manual_info['arch']}) - {suf}"
             self.java_map[long_display] = manual_info
             display_list.insert(0, long_display)
             target_display = long_display

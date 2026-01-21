@@ -55,11 +55,17 @@ KNOWN_GAME_MAINS = [
 # 最终要调用的真实游戏主类 (用于替换 Wrapper)
 REAL_MINECRAFT_MAIN = "net.minecraft.client.main.Main"
 
+# 是否开放内嵌 Java
+ENABLE_LOCAL_JAVA = True
+
 # =========================================================================
 # Java 扫描路径
 # =========================================================================
 JAVA_SCAN_PATHS = {
     "Darwin": [
+        # --- Local Java ---
+        ".YggProxy/YggProRuntime/",
+
         # --- Prism Launcher ---
         "~/Library/Application Support/PrismLauncher/java",
         "~/Library/Application Support/PrismLauncher/jre",
@@ -77,6 +83,9 @@ JAVA_SCAN_PATHS = {
     ],
 
     "Windows": [
+        # --- Local Java ---
+        ".YggProxy/YggProRuntime/",
+
         # --- Prism Launcher ---
         "%APPDATA%\\PrismLauncher\\java",
         "%APPDATA%\\PrismLauncher\\jre",
@@ -88,6 +97,9 @@ JAVA_SCAN_PATHS = {
     ],
 
     "Linux": [
+        # --- Local Java ---
+        ".YggProxy/YggProRuntime/",
+
         # --- Prism Launcher ---
         "~/.local/share/PrismLauncher/java",
         "~/.local/share/PrismLauncher/jre",
