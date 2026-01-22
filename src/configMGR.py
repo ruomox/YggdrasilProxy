@@ -33,6 +33,7 @@ class ConfigManager:
 
         self._config_data = {
             "configVersion": constants.CONFIG_VERSION,
+            "language": "zh_CN",
             "real_java_path": None,
             "accounts": {},
             "instance_map": {},
@@ -288,6 +289,14 @@ class ConfigManager:
             cfg = cfg.copy()
             if "base_url" in cfg: cfg["base_url"] = cfg["base_url"].rstrip('/')
             return cfg
+
+    def get_language(self):
+        with self._lock: return self._config_data.get("language", "zh_CN")
+
+    def set_language(self, lang_code):
+        with self._lock:
+            self._config_data["language"] = lang_code
+            self.save()
 
     # GUI 用
     def set_default_account(self, uuid):

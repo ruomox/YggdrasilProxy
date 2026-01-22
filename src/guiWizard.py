@@ -10,6 +10,7 @@ from tkinter import messagebox
 from src import constants, authAPI, javaScanner
 from src.configMGR import config_mgr
 from src.avatarMGR import AvatarManager
+from src.i18n import I18n
 
 # ================= 1. 外观配置 =================
 ctk.set_appearance_mode("Dark")
@@ -63,7 +64,7 @@ class AccountCard(ctk.CTkFrame):
         self.name_lbl.grid(row=0, column=1, sticky="sw", padx=(0, 10), pady=(6, 0))
 
         # 3. 来源
-        api_name = auth_data.get("api_name", "认证账户")
+        api_name = auth_data.get("api_name", I18n.t("account_source_default"))
         self.source_lbl = ctk.CTkLabel(
             self, text=api_name, font=("Microsoft YaHei UI", 11), text_color="gray", anchor="w"
         )
@@ -165,7 +166,7 @@ class ModernWizard(ctk.CTk):
         self.setup_success = False
         self.game_dir = game_dir  # 【新增】保存实例路径
 
-        self.title(f"{constants.PROXY_NAME} 配置向导")
+        self.title(f"{constants.PROXY_NAME} {I18n.t('window_title')}")
         # --- 窗口居中 & 置顶 (修复) ---
         w, h = 820, 500
         self.minsize(800, 500)
@@ -234,7 +235,7 @@ class ModernWizard(ctk.CTk):
         textbox.configure(state="disabled")  # 只读
 
         # 关闭按钮
-        ctk.CTkButton(top, text="关闭", command=top.destroy).pack(pady=(0, 20))
+        ctk.CTkButton(top, text=I18n.t("show_custom_dig_close_btn"), command=top.destroy).pack(pady=(0, 20))
 
     # ================= UI 构建 =================
 
@@ -251,7 +252,7 @@ class ModernWizard(ctk.CTk):
 
         # 标题
         title_lbl = ctk.CTkLabel(
-            self.sidebar, text="账户", font=("Microsoft YaHei UI", 16, "bold"), anchor="w"
+            self.sidebar, text=I18n.t("sidebar_accounts"), font=("Microsoft YaHei UI", 16, "bold"), anchor="w"
         )
         title_lbl.grid(row=0, column=0, sticky="ew", padx=20, pady=(25, 10))
         title_lbl.bind("<MouseWheel>", _scroll_handler)  # 标题也支持滚轮
@@ -273,7 +274,7 @@ class ModernWizard(ctk.CTk):
 
         self.launch_btn = ctk.CTkButton(
             self.launch_area,
-            text="启动游戏",
+            text=I18n.t("btn_launch"),
             font=("Microsoft YaHei UI", 16, "bold"),
             height=45,
             fg_color=COLOR_ACCENT,
@@ -282,7 +283,7 @@ class ModernWizard(ctk.CTk):
         )
         self.launch_btn.pack(fill="x")
 
-        self.ver_lbl = ctk.CTkLabel(self.launch_area, text="Ready to launch", font=("Arial", 10), text_color="gray")
+        self.ver_lbl = ctk.CTkLabel(self.launch_area, text=I18n.t("status_ready"), font=("Arial", 10), text_color="gray")
         self.ver_lbl.pack(pady=(5, 0))
 
     def _init_main_panel(self):
@@ -294,14 +295,14 @@ class ModernWizard(ctk.CTk):
         ctk.CTkFrame(self.main, height=25, fg_color="transparent").pack()
 
         # --- 1. Java 环境板块 (UI 重构) ---
-        self._create_section_container("Java 运行环境")
+        self._create_section_container(I18n.t("sec_java"))
 
         java_row = ctk.CTkFrame(self.current_section, fg_color="transparent")
         java_row.pack(fill="x", pady=(5, 0))
 
         # 1. 下拉框 (显示精简信息)
         self.java_map = {}  # 存储 "显示名" -> "详细信息Dict" 的映射
-        self.java_var = tkinter.StringVar(value="正在扫描...")
+        self.java_var = tkinter.StringVar(value=I18n.t("java_scanning"))
 
         self.java_combo = ctk.CTkComboBox(
             java_row, variable=self.java_var, height=32,
@@ -332,7 +333,7 @@ class ModernWizard(ctk.CTk):
         ).pack(side="left")
 
         # --- 2. 认证服务器板块 ---
-        self._create_section_container("认证服务器 (API)")
+        self._create_section_container(I18n.t("sec_api"))
 
         api_row = ctk.CTkFrame(self.current_section, fg_color="transparent")
         api_row.pack(fill="x", pady=(5, 0))
@@ -368,11 +369,11 @@ class ModernWizard(ctk.CTk):
         ).pack(side="left")
 
         # --- 3. 登录板块 ---
-        self._create_section_container("登录新账号")
+        self._create_section_container(I18n.t("sec_login"))
 
         # 邮箱
         ctk.CTkLabel(
-            self.current_section, text="邮箱 / 用户名:",
+            self.current_section, text=I18n.t("lbl_email"),
             font=("Microsoft YaHei UI", 10), text_color=COLOR_TEXT_GRAY
         ).pack(anchor="w", pady=(3, 1))
 
@@ -384,16 +385,16 @@ class ModernWizard(ctk.CTk):
 
         # 密码
         ctk.CTkLabel(
-            self.current_section, text="密码:",
+            self.current_section, text=I18n.t("lbl_pwd"),
             font=("Microsoft YaHei UI", 10), text_color=COLOR_TEXT_GRAY
         ).pack(anchor="w", pady=(0, 1))
 
         self.pwd_entry = ctk.CTkEntry(self.current_section, height=32, show="•")
-        self.pwd_entry.pack(fill="x", pady=(0, 2))
+        self.pwd_entry.pack(fill="x", pady=(0, 0))
 
         # 密码提示语
         ctk.CTkLabel(
-            self.current_section, text="* YggdrasilProxy 不会记录您的密码",
+            self.current_section, text=I18n.t("lbl_pwd_hint"),
             font=("Microsoft YaHei UI", 10), text_color=COLOR_TEXT_DIM
         ).pack(anchor="w", pady=(0, 0))
 
@@ -404,7 +405,7 @@ class ModernWizard(ctk.CTk):
         bottom_area.pack(fill="x", padx=30, pady=(0, 53), side="bottom")
 
         self.login_btn = ctk.CTkButton(
-            bottom_area, text="验证并添加", height=45,  # 高度与启动按钮一致
+            bottom_area, text=I18n.t("btn_verify"), height=45,  # 高度与启动按钮一致
             font=("Microsoft YaHei UI", 14, "bold"),
             command=self._on_verify
         )
@@ -413,6 +414,54 @@ class ModernWizard(ctk.CTk):
         # 初始化数据
         self._refresh_api_ui()
         self.api_combo.bind("<Return>", lambda e: self._save_custom_api_from_input())
+        self._init_language_button()
+
+    def _init_language_button(self):
+        """在右上角初始化圆形语言切换按钮 (静默模式)"""
+        # 创建圆形按钮
+        self.lang_btn = ctk.CTkButton(
+            self.main,  # 父容器：右侧面板
+            text="文",  # 显示文字，可改为图标
+            width=30, height=30,
+            corner_radius=15,  # 圆形
+            fg_color="#555555",
+            hover_color="#666666",
+            font=("Microsoft YaHei UI", 12, "bold"),
+            command=self._show_language_menu
+        )
+
+        # 绝对定位到右上角 (右偏移15，下偏移15)
+        self.lang_btn.place(relx=1.0, x=-15, y=15, anchor="ne")
+
+    def _show_language_menu(self):
+        """显示下拉菜单"""
+        menu = tkinter.Menu(self, tearoff=0)
+
+        current_code = I18n.get_current_language_code()
+        langs = I18n.get_languages()
+
+        for code, name in langs.items():
+            # 视觉反馈：当前语言前打勾
+            label_text = f"✓ {name}" if code == current_code else f"   {name}"
+
+            menu.add_command(
+                label=label_text,
+                command=lambda c=code: self._change_language_quietly(c)
+            )
+
+        # 在按钮正下方弹出
+        x = self.lang_btn.winfo_rootx()
+        y = self.lang_btn.winfo_rooty() + self.lang_btn.winfo_height() + 5
+        menu.tk_popup(x, y)
+
+    def _change_language_quietly(self, lang_code):
+        """切换语言并保存，不重启，不弹窗"""
+        if I18n.get_current_language_code() == lang_code:
+            return
+
+        # 仅保存配置
+        config_mgr.set_language(lang_code)
+        print(f"Language switched to {lang_code}. Restart required to take effect.")
 
     def _create_section_container(self, title):
         container = ctk.CTkFrame(self.main, fg_color="transparent")
@@ -454,9 +503,9 @@ class ModernWizard(ctk.CTk):
 
     def _show_context_menu(self, event, uuid):
         m = tkinter.Menu(self, tearoff=0)
-        m.add_command(label="复制 UUID", command=lambda: self._copy_uuid(uuid))
+        m.add_command(label=I18n.t("copy_uuid"), command=lambda: self._copy_uuid(uuid))
         m.add_separator()
-        m.add_command(label="删除账号", command=lambda: self._del_account(uuid))
+        m.add_command(label=I18n.t("del_account"), command=lambda: self._del_account(uuid))
         m.tk_popup(event.x_root, event.y_root)
 
     def _copy_uuid(self, uuid):
@@ -464,7 +513,7 @@ class ModernWizard(ctk.CTk):
         self.clipboard_append(uuid)
 
     def _del_account(self, uuid):
-        if messagebox.askyesno("确认", "确定删除该账号吗？"):
+        if messagebox.askyesno(I18n.t("conform_yes"), I18n.t("conform_question")):
             config_mgr.remove_account(uuid)
             self._refresh_account_list()
 
@@ -513,19 +562,19 @@ class ModernWizard(ctk.CTk):
 
             self._refresh_api_ui()
             self.api_combo.set(name)
-            messagebox.showinfo("提示", "新 API 已保存")
+            messagebox.showinfo(I18n.t("api_info"), I18n.t("api_saved_info"))
             return new_api
 
         return None
 
     def _del_api(self):
         idx = config_mgr.get_current_api_index()
-        if idx == 0: return messagebox.showwarning("禁止", "默认 API 不可删除")
+        if idx == 0: return messagebox.showwarning(I18n.t("api_del_ban"), I18n.t("api_del_ban_info"))
 
         l = config_mgr.get_api_list()
         name = l[idx]["name"]
 
-        if messagebox.askyesno("删除", f"确定删除 API '{name}' 吗？"):
+        if messagebox.askyesno(I18n.t("api_del_info"), I18n.t("api_del_conform").format(name=name)):
             l.pop(idx)
             config_mgr.set_api_list(l)
             config_mgr.set_current_api_index(0)
@@ -545,7 +594,7 @@ class ModernWizard(ctk.CTk):
         api = config_mgr.get_current_api_config()
         url = f"{api['base_url']}/authserver/authenticate"
 
-        self.login_btn.configure(text="验证中...", state="disabled")
+        self.login_btn.configure(text=I18n.t("now_conforming"), state="disabled")
         threading.Thread(target=self._do_verify, args=(url, email, pwd), daemon=True).start()
 
     def _do_verify(self, u, e, p):
@@ -556,14 +605,14 @@ class ModernWizard(ctk.CTk):
             self.after(0, lambda: self._on_login_fail(err))
 
     def _on_login_success(self, data, email):
-        self.login_btn.configure(text="验证并添加", state="normal")
+        self.login_btn.configure(text=I18n.t("btn_verify"), state="normal")
 
         profiles = data.get("availableProfiles", [])
         if not profiles and data.get("selectedProfile"):
             profiles = [data["selectedProfile"]]
 
         if not profiles:
-            return messagebox.showerror("错误", "该账号没有游戏角色")
+            return messagebox.showerror(I18n.t("err_no_prof"), I18n.t("err_no_prof_info"))
 
         api_cfg = config_mgr.get_current_api_config()
         api_name_short = api_cfg["name"]
@@ -584,11 +633,14 @@ class ModernWizard(ctk.CTk):
         config_mgr.add_history_user(email)
         self.pwd_entry.delete(0, "end")
         self._refresh_account_list()
-        messagebox.showinfo("成功", f"成功添加 {len(profiles)} 个角色")
+        messagebox.showinfo(
+            I18n.t("success_prof"),
+            I18n.t("success_prof_info").format(count=len(profiles))
+        )
 
     def _on_login_fail(self, e):
-        self.login_btn.configure(text="验证并添加", state="normal")
-        messagebox.showerror("验证失败", str(e))
+        self.login_btn.configure(text=I18n.t("btn_verify"), state="normal")
+        messagebox.showerror(I18n.t("login_fail_info"), str(e))
 
     # --- Java ---
     def _on_java_scan_finished(self, infos):
@@ -605,7 +657,7 @@ class ModernWizard(ctk.CTk):
             # 检测路径中是否包含 .YggProxy (或者 constants.DATA_DIR_NAME)
             # 只要包含这个关键字，就认为是内嵌版，隐藏长路径
             if constants.DATA_DIR_NAME in path or ".YggProxy" in path:
-                suffix = "[YggdrasilProxy 内嵌]"
+                suffix = I18n.t("yggpro_in_java")
             else:
                 suffix = path
             # 构造长名字：版本 (架构) - 路径
@@ -624,7 +676,7 @@ class ModernWizard(ctk.CTk):
                 manual_info = {"path": current_path, "version": "?", "arch": "?"}
             # 对 Config 里的路径也做同样的判断
             if constants.DATA_DIR_NAME in current_path or ".YggProxy" in current_path:
-                suf = "[YggdrasilProxy 内嵌]"
+                suf = I18n.t("yggpro_in_java")
             else:
                 suf = current_path
 
@@ -640,7 +692,7 @@ class ModernWizard(ctk.CTk):
             # 注意：这里调用 _on_java_change 会自动把长名字截断为短名字显示
             self._on_java_change(target_display if target_display else display_list[0])
         else:
-            self.java_combo.set("未找到 Java")
+            self.java_combo.set(I18n.t("java_not_found"))
 
     def _on_java_change(self, long_display_name):
         """
@@ -679,7 +731,7 @@ class ModernWizard(ctk.CTk):
                 # 触发选中逻辑 (会自动变短)
                 self._on_java_change(long_display)
             else:
-                messagebox.showerror("错误", "无效的 Java 可执行文件")
+                messagebox.showerror(I18n.t("browse_java_err"), I18n.t("browse_java_err_info"))
 
     def _show_java_details(self):
         info = getattr(self, "current_java_info", None)
@@ -696,15 +748,18 @@ class ModernWizard(ctk.CTk):
                     break
 
         if not info:
-            return messagebox.showinfo("详情", "请先选择一个有效的 Java 环境")
+            return messagebox.showinfo(I18n.t("show_java_dtl"), I18n.t("show_java_dtl_info"))
 
-        msg = f"版本: {info.get('version')}\n" \
-              f"架构: {info.get('arch')}\n" \
-              f"路径: {info.get('path')}\n\n" \
-              f"========= 原始输出 =========\n{info.get('raw_info')}"
+        template = I18n.t("msg_java_details")
+        msg = template.format(
+            version=info.get('version'),
+            arch=info.get('arch'),
+            path=info.get('path'),
+            raw=info.get('raw_info')
+        )
 
         # 【修改】使用自定义弹窗，宽600，高371
-        self._show_custom_dialog("Java 详情", msg, 600, 371)
+        self._show_custom_dialog(I18n.t("show_custom_dig_tit"), msg, 600, 371)
 
     # --- 启动 ---
     def _on_launch(self):
@@ -712,7 +767,7 @@ class ModernWizard(ctk.CTk):
             self._save_custom_api_from_input()
 
         if not self.current_auth_data:
-            return messagebox.showwarning("提示", "请先选择一个账号")
+            return messagebox.showwarning(I18n.t("on_launch_acc_tit"), I18n.t("on_launch_select_acc"))
 
         # 【核心修复】直接使用内存中保存的真实路径
         # 因为现在输入框里显示的是 "Java 17 (x64)" 这种短名字，不能直接用来启动
@@ -722,7 +777,8 @@ class ModernWizard(ctk.CTk):
         if not final_path:
             final_path = config_mgr.get_real_java_path()
 
-        if not final_path: return messagebox.showwarning("提示", "Java 路径为空")
+        if not final_path: return messagebox.showwarning(
+            I18n.t("on_launch_no_java_tit"), I18n.t("on_launch_no_java_info"))
 
         # 如果传入了游戏目录，则进行绑定；否则只设置全局默认
         if self.game_dir:
