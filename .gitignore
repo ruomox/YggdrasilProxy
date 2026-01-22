@@ -8,4 +8,5 @@ assets
 net
 *.md
 !README.md
+!README.en.md
 !assets/fMcMain.jar
