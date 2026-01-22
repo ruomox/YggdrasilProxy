@@ -321,7 +321,7 @@ def main():
         if platform.system() == "Windows":
             sys.exit(subprocess.call(final_cmd))
         else:
-            os.execv(target_java, final_cmd)
+            os.execv(launch_java, final_cmd)
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr);
         sys.exit(1)
