@@ -2,7 +2,7 @@
 
 ---
 
-🌍 English | [简体中文](./README.md)
+🌍 English | [简体中文](./README.zh_CN.md)
 
 
 YggdrasilProxy is a **launch-time middleware tool** for Minecraft.  
