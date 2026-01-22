@@ -25,7 +25,7 @@ INJECTOR_FILENAME = "authlib-injector.jar"
 # 默认 API 列表模板
 DEFAULT_API_LIST = [
     {
-        "name": "LittleSkin (默认)",
+        "name": "LittleSkin",
         "base_url": "https://littleskin.cn/api/yggdrasil",
     }
 ]

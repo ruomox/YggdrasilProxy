@@ -10,6 +10,7 @@ SUPPORTED_LANGUAGES = {
 # 2. 定义翻译字典 (Key -> 多语言文本)
 TRANSLATIONS = {
     "zh_CN": {
+        "api_default": "LittleSkin (默认)",
         "window_title": "配置向导",
         "sidebar_accounts": "账户",
         "account_source_default": "认证账户",
@@ -55,6 +56,7 @@ TRANSLATIONS = {
         "on_launch_no_java_info": "Java 路径为空",
     },
     "en_US": {
+        "api_default": "LittleSkin (Default)",
         "window_title": "Setup Wizard",
         "sidebar_accounts": "Accounts",
         "account_source_default": "Authentication Account",

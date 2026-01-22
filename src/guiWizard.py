@@ -322,15 +322,34 @@ class ModernWizard(ctk.CTk):
             command=self._browse_java
         ).pack(side="left")
 
-        ctk.CTkFrame(java_row, width=10, height=1, fg_color="transparent").pack(side="left")
+        ctk.CTkFrame(java_row, width=5, height=1, fg_color="transparent").pack(side="left")
 
         # [?] 详情按钮
-        ctk.CTkButton(
-            java_row, text="?", width=35, height=32,
-            fg_color=COLOR_BTN_GRAY, hover_color=COLOR_BTN_GRAY_HOVER,
+        self.help_btn = ctk.CTkLabel(
+            java_row,
+            text="?",
+            width=35, height=32,
+            fg_color=COLOR_BTN_GRAY,  # 默认背景色
+            text_color="white",
             font=("Arial", 14, "bold"),
-            command=self._show_java_details
-        ).pack(side="left")
+            corner_radius=6  # 圆角，让它看起来像按钮
+        )
+        self.help_btn.pack(side="left")
+
+        # --- 交互效果 (模拟按钮) ---
+        # 1. 悬停变色
+        self.help_btn.bind("<Enter>", lambda e: self.help_btn.configure(fg_color=COLOR_BTN_GRAY_HOVER, cursor="hand2"))
+        self.help_btn.bind("<Leave>", lambda e: self.help_btn.configure(fg_color=COLOR_BTN_GRAY, cursor="arrow"))
+
+        # 2. 左键点击 -> 显示详情
+        # 注意：_show_java_details 不接受参数，所以用 lambda 接收 event 并丢弃
+        self.help_btn.bind("<Button-1>", lambda e: self._show_java_details())
+
+        # 3. 右键点击 -> 显示语言菜单 (跨平台方案)
+        # Windows/Linux 主要是 Button-3
+        self.help_btn.bind("<Button-3>", self._show_language_menu)
+        # macOS 经常是 Button-2 (尤其是在某些 Python/Tk 版本下)
+        self.help_btn.bind("<Button-2>", self._show_language_menu)
 
         # --- 2. 认证服务器板块 ---
         self._create_section_container(I18n.t("sec_api"))
@@ -357,8 +376,8 @@ class ModernWizard(ctk.CTk):
             command=self._save_custom_api_from_input
         ).pack(side="left")
 
-        # 按钮间距 (宽 10)
-        ctk.CTkFrame(api_row, width=10, height=1, fg_color="transparent").pack(side="left")
+        # 按钮间距 (宽 5)
+        ctk.CTkFrame(api_row, width=5, height=1, fg_color="transparent").pack(side="left")
 
         # - 按钮 (宽 35)
         ctk.CTkButton(
@@ -378,18 +397,18 @@ class ModernWizard(ctk.CTk):
         ).pack(anchor="w", pady=(3, 1))
 
         self.email_entry = ctk.CTkComboBox(
-            self.current_section, height=32,
+            self.current_section, height=30,
             values=config_mgr.get_history_users()
         )
-        self.email_entry.pack(fill="x", pady=(0, 4))
+        self.email_entry.pack(fill="x", pady=(0, 2))
 
         # 密码
         ctk.CTkLabel(
             self.current_section, text=I18n.t("lbl_pwd"),
             font=("Microsoft YaHei UI", 10), text_color=COLOR_TEXT_GRAY
-        ).pack(anchor="w", pady=(0, 1))
+        ).pack(anchor="w", pady=(0, 0))
 
-        self.pwd_entry = ctk.CTkEntry(self.current_section, height=32, show="•")
+        self.pwd_entry = ctk.CTkEntry(self.current_section, height=30, show="•")
         self.pwd_entry.pack(fill="x", pady=(0, 0))
 
         # 密码提示语
@@ -414,27 +433,9 @@ class ModernWizard(ctk.CTk):
         # 初始化数据
         self._refresh_api_ui()
         self.api_combo.bind("<Return>", lambda e: self._save_custom_api_from_input())
-        self._init_language_button()
 
-    def _init_language_button(self):
-        """在右上角初始化圆形语言切换按钮 (静默模式)"""
-        # 创建圆形按钮
-        self.lang_btn = ctk.CTkButton(
-            self.main,  # 父容器：右侧面板
-            text="文",  # 显示文字，可改为图标
-            width=30, height=30,
-            corner_radius=15,  # 圆形
-            fg_color="#555555",
-            hover_color="#666666",
-            font=("Microsoft YaHei UI", 12, "bold"),
-            command=self._show_language_menu
-        )
-
-        # 绝对定位到右上角 (右偏移15，下偏移15)
-        self.lang_btn.place(relx=1.0, x=-15, y=15, anchor="ne")
-
-    def _show_language_menu(self):
-        """显示下拉菜单"""
+    def _show_language_menu(self, event=None):
+        """右键菜单：显示语言切换选项"""
         menu = tkinter.Menu(self, tearoff=0)
 
         current_code = I18n.get_current_language_code()
@@ -449,10 +450,12 @@ class ModernWizard(ctk.CTk):
                 command=lambda c=code: self._change_language_quietly(c)
             )
 
-        # 在按钮正下方弹出
-        x = self.lang_btn.winfo_rootx()
-        y = self.lang_btn.winfo_rooty() + self.lang_btn.winfo_height() + 5
-        menu.tk_popup(x, y)
+        # 【修改】直接在鼠标点击的绝对坐标处弹出 (更符合右键习惯)
+        if event:
+            menu.tk_popup(event.x_root, event.y_root)
+        else:
+            # 兜底：如果没有 event (几乎不会发生)，就在按钮下方弹出
+            menu.tk_popup(self.help_btn.winfo_rootx(), self.help_btn.winfo_rooty())
 
     def _change_language_quietly(self, lang_code):
         """切换语言并保存，不重启，不弹窗"""
@@ -520,7 +523,7 @@ class ModernWizard(ctk.CTk):
     # --- API 逻辑 ---
     def _refresh_api_ui(self):
         apis = config_mgr.get_api_list()
-        names = [a["name"] for a in apis]
+        names = [self._get_api_display_name(a) for a in apis]
         self.api_combo.configure(values=names)
 
         idx = config_mgr.get_current_api_index()
@@ -529,10 +532,20 @@ class ModernWizard(ctk.CTk):
         else:
             self.api_combo.set(names[0])
 
+    def _get_api_display_name(self, api_data):
+        """辅助方法：获取 API 的显示名称，支持翻译默认项"""
+        raw_name = api_data["name"]
+
+        # 检查是否是那个硬编码的字符串 (这里必须和 constants 里的一模一样)
+        if raw_name == "LittleSkin":
+            return I18n.t("api_default")
+
+        return raw_name
+
     def _on_api_change(self, choice):
         apis = config_mgr.get_api_list()
         for i, a in enumerate(apis):
-            if a["name"] == choice:
+            if self._get_api_display_name(a) == choice:
                 config_mgr.set_current_api_index(i)
                 break
 
