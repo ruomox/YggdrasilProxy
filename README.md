@@ -1,54 +1,52 @@
 # YggdrasilProxy
 
----
-
 🌍 English | [简体中文](./README.zh_CN.md)
 
+---
 
-YggdrasilProxy is a **launch-time middleware tool** for Minecraft.  
-It is designed to centrally manage **third-party authentication accounts, Yggdrasil servers, and Java runtimes**,  
+YggdrasilProxy is a **launcher middleware tool** for Minecraft,  
+designed to centrally manage **third-party authentication, servers, and Java runtimes**,  
 without replacing or modifying your existing launcher.
 
-It works alongside almost all major launchers, including  
-**HMCL, Prism Launcher, and the official Minecraft Launcher**.
+It works with **HMCL, Prism Launcher, the official Minecraft Launcher**, and **almost all** other launchers.
 
 ---
 
-## ✨ What does this tool do?
+## ✨ What can this tool do?
 
-- Manage multiple Yggdrasil authentication accounts
-- Bind different accounts to different Minecraft instances
-- Automatically inject `authlib-injector` at launch time
-- Adapt to different launcher argument structures
-- Select or bind Java runtimes per instance
-- Optional embedded Java for environment-free launching
+- Manage multiple Yggdrasil authentication accounts  
+- Bind accounts to different Minecraft instances  
+- Automatically inject authlib-injector at launch  
+- Adapt to different launcher parameter formats  
+- Select or bind Java runtimes per instance  
+- Optionally bundle Java for environment-free launching  
 
 ---
 
 ## 🚀 Quick Start Guide
 
 ### 1️⃣ Download
-Go to the **Releases** page and choose the version that fits your needs:
 
-- **Lite version**: No bundled Java (recommended, smaller size)
-- **Full version**: Includes an embedded Java runtime, ready to use
+Go to the **Releases** page and choose the version that suits you:
+
+- **Standard Edition**: Uses an existing system Java environment  
+- **Java Edition**: Bundles Java, ready to use out of the box  
 
 ### 2️⃣ Use with your launcher
-- Set **YggdrasilProxy** as the Java executable used by your launcher
-- Add the ```--yggpro``` launch argument in your launcher to force the login/config UI
 
----
+- Set **YggdrasilProxy** as the game Java executable
+- Add the launch parameter ```--yggpro``` in your launcher to force the login page to open.
 
-## 3️⃣ First Launch Configuration
+### 3️⃣ First-time setup
 
-On the first run, a configuration window will appear:
+On first launch, a configuration window will appear:
 
 1. Add or select an account  
-2. Choose an authentication server (LittleSkin is included by default) 
-3. Select a Java runtime
-4. Click Launch Game 
+2. Select an authentication server (LittleSkin included by default)  
+3. Choose a Java runtime  
+4. Click “Launch Game”  
 
-All settings are automatically saved per Minecraft instance.
+All settings are saved per instance automatically.
 
 ---
 
@@ -56,61 +54,36 @@ All settings are automatically saved per Minecraft instance.
 
 - HMCL  
 - Prism Launcher  
-- MultiMC
-- Official Minecraft Launcher
-- And almost all other standard-compliant launchers !
+- MultiMC  
+- Official Minecraft Launcher  
+- Almost all launchers!
 
 ---
 
-## ⚠️ Usage Notes
+## ⚠️ Security Notes
 
-- Your password is never stored 
-- Access tokens are encrypted locally  
-- Game files are never modified 
-- Does not affect official server or online authentication rules  
-
----
-
-## 🔧 Technical Overview
-
-### System Architecture
-
-YggdrasilProxy operates as a launch argument control layer:
-
-1. Detects launcher type 
-2. Extracts the real game launch arguments  
-3. Injects authentication and runtime configuration  
-4. Launches Minecraft in a controlled environment  
-
-### Java Selection Priority
-
-1. Java bound to the current instance   
-2. Java detected on the system 
-3. Embedded Java (if available)
-
-### Authentication Logic
-
-- Full support for the Yggdrasil protocol 
-- Automatic token validation and refresh  
-- Supports multiple profiles under a single account 
-
-### Security Model
-
-- Tokens are encrypted before being written to disk  
-- Passwords are never written to disk  
-- Network requests are restricted to the selected authentication server  
+- Does not modify your game files  
+- Does not record or store your password  
+- Access tokens are stored locally in encrypted form  
+- Network requests are limited to the selected authentication server  
 
 ---
 
-## 📦 Build Instructions
+## 📦 Build
+
+#### Pseudocode, see [pyCMD](pyCMD.md) for details
+
 ```bash
-pyinstaller -F \
-  --collect-all cryptography \
-  # [Optional] YggProJRE.zip: bundled Java runtime archive
-  --add-data "assets/YggProJRE.zip:assets" \
-  --add-data "assets/fMcMain.jar:assets" \
-  --add-data "assets/authlib-injector.jar:assets" \
-  --name="YggdrasilProxy" \
+pyinstaller -F
+  --collect-all cryptography
+  # [Optional] YggProJAVA.zip is the Java package you want to bundle
+  --add-data "assets/YggProJAVA.zip:assets"
+  --add-data "assets/fMcMain.jar:assets"
+  --add-data "assets/authlib-injector.jar:assets"
+  # [Compatibility] Optional, for compatibility with some Windows launchers 
+  --add-data "assets\javaw.exe;assets"
+  --add-data "assets\javac.exe;assets"
+  --name="YggdrasilProxy"
   run.py
 ```
 

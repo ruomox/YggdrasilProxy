@@ -3,11 +3,12 @@
 build
 dist
 test
-assets
-bundles
-*.spec
 net
+release
+*.spec
 *.md
+assets/authlib-injector.jar
+assets/YggProJAVA.zip
 !README.md
 !README.en.md
-!assets/fMcMain.jar
+!pyCMD.md
