@@ -4,6 +4,7 @@ build
 dist
 test
 assets
+bundles
 *.spec
 net
 *.md

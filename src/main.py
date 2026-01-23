@@ -285,7 +285,7 @@ def main():
     # [4] 账号
     game_dir = get_game_dir(captured_game_args)
     auth_data = ensure_account_valid(game_dir, force_gui=force_config_mode)
-    if not auth_data: sys.exit(1)
+    if not auth_data: sys.exit(0)
 
     # === 实际启动 Java 选择链：instance -> target -> tool ===
     instance_java = config_mgr.get_java_for_instance(game_dir)

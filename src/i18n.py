@@ -22,7 +22,7 @@ TRANSLATIONS = {
         "sec_login": "登录新账号",
         "lbl_email": "邮箱 / 用户名:",
         "lbl_pwd": "密码:",
-        "lbl_pwd_hint": "* YggdrasilProxy 不会记录您的密码",
+        "lbl_pwd_hint": "※ YggdrasilProxy 不会记录您的密码",
         "btn_verify": "验证并添加",
         "java_scanning": "正在扫描...",
         "msg_select_acc": "请先选择一个账号",
