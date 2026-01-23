@@ -8,7 +8,9 @@ YggdrasilProxy is a **launcher middleware tool** for Minecraft,
 designed to centrally manage **third-party authentication, servers, and Java runtimes**,  
 without replacing or modifying your existing launcher.
 
-It works with **HMCL, Prism Launcher, the official Minecraft Launcher**, and **almost all** other launchers.
+It works with **HMCL, Prism Launcher, PCL2, the official Minecraft Launcher**, and **almost all** other launchers.
+
+![Main Window](readmePic/guiMain-en.png)
 
 ---
 
@@ -44,9 +46,12 @@ On first launch, a configuration window will appear:
 1. Add or select an account  
 2. Select an authentication server (LittleSkin included by default)  
 3. Choose a Java runtime  
-4. Click “Launch Game”  
+4. Click “Launch Game” to proceed. All settings are saved per instance automatically.
 
-All settings are saved per instance automatically.
+### 4️⃣ Features
+- Double-click the application to open compatibility settings  
+- Right-click the `?` icon to switch the interface language
+- Right-click an account to copy its UUID
 
 ---
 
