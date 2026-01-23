@@ -129,6 +129,10 @@ def ensure_account_valid(game_dir, force_gui=False):
                 config_mgr.add_or_update_account(auth_data)
         except Exception as e:
             print(f"[{constants.PROXY_NAME}] Refresh Failed: {e}", file=sys.stderr)
+            # 标记账号失效
+            if auth_data:
+                auth_data["invalid"] = True
+                config_mgr.add_or_update_account(auth_data)
             need_gui = True
 
     if need_gui:

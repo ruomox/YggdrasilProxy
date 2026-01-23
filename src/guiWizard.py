@@ -65,9 +65,19 @@ class AccountCard(ctk.CTkFrame):
         self.name_lbl.grid(row=0, column=1, sticky="sw", padx=(0, 10), pady=(6, 0))
 
         # 3. 来源
-        api_name = auth_data.get("api_name", I18n.t("account_source_default"))
+        if auth_data.get("invalid") == True:
+            # 失效状态：显示红色警告
+            display_text = I18n.t("account_source_invalid")
+            # 使用浅红色，在深色背景下更清晰
+            text_color = "#FF5555"
+        else:
+            # 正常状态：显示 API 名称 (灰色)
+            display_text = auth_data.get("api_name", I18n.t("account_source_default"))
+            text_color = "gray"
+
         self.source_lbl = ctk.CTkLabel(
-            self, text=api_name, font=("Microsoft YaHei UI", 11), text_color="gray", anchor="w"
+            self, text=display_text, font=("Microsoft YaHei UI", 11),
+            text_color=text_color, anchor="w"
         )
         self.source_lbl.grid(row=1, column=1, sticky="nw", padx=(0, 10), pady=(0, 6))
 
