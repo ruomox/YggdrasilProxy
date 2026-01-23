@@ -84,6 +84,7 @@ pyinstaller -F
   --name="YggdrasilProxy"
   run.py
 ```
+本项目使用了 authlib-injector，由 [yushijinhun](https://github.com/yushijinhun/authlib-injector) 提供，特此感谢原作者。
 
 ---
 
