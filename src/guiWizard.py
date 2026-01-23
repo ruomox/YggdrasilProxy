@@ -27,6 +27,7 @@ COLOR_TEXT_GRAY = "#AAAAAA"  # 灰色文字
 COLOR_TEXT_DIM = "#777777"  # 更暗的提示文字
 COLOR_BTN_GRAY = "#444444"  # 通用灰色按钮
 COLOR_BTN_GRAY_HOVER = "#555555"
+ZWSP = "\u200b"
 
 
 class AccountCard(ctk.CTkFrame):
@@ -401,6 +402,7 @@ class ModernWizard(ctk.CTk):
             values=config_mgr.get_history_users()
         )
         self.email_entry.pack(fill="x", pady=(0, 2))
+        self.email_entry.set(ZWSP)
 
         # 密码
         ctk.CTkLabel(
@@ -596,7 +598,7 @@ class ModernWizard(ctk.CTk):
 
     # --- 登录逻辑 ---
     def _on_verify(self):
-        email = self.email_entry.get().strip()
+        email = self.email_entry.get().replace(ZWSP, "").strip()
         pwd = self.pwd_entry.get().strip()
         if not email or not pwd: return
 

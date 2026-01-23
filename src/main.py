@@ -4,7 +4,7 @@ import os
 import subprocess
 import platform
 import re
-from src import constants, runtimeMGR, authAPI, guiWizard, javaScanner
+from src import constants, runtimeMGR, authAPI, guiWizard, javaScanner, pclCompat, preSetup
 from src.configMGR import config_mgr
 
 
@@ -151,6 +151,8 @@ def ensure_account_valid(game_dir, force_gui=False):
 # ================= 4. 主入口 =================
 
 def main():
+    # 前置页面
+    preSetup.check_entry_mode()
     sys_args = sys.argv[1:]
 
     # ===================== DEBUG: 原始入口 =====================
@@ -166,24 +168,47 @@ def main():
     # 兼容旧参数名以防万一，统一逻辑状态
     force_config_mode = ("--yggpro" in sys_args)
 
-    # [第1层] 入口清洗：物理删除参数，确保后续 JVM 调用（如嗅探器）绝对安全
+    # [第1层] 入口清洗
     raw_args = [arg for arg in sys_args if arg not in ("--yggpro", "--yggprodebug")]
 
     config_mgr.load()
+
+    # 初始候选
     tool_java = runtimeMGR.get_fallback_java()
     target_java = config_mgr.get_real_java_path()
-    if not target_java and not tool_java:
+
+    def is_valid_java(p):
+        return p and os.path.exists(p)
+
+    # [第2层] 优先使用 config 中仍然存在的 Java
+    if not is_valid_java(target_java):
+        target_java = None
+
+    # [第3层] config Java 不可用 → 重新扫描
+    if not target_java:
+        print(f"[{constants.PROXY_NAME}] Java path invalid or missing, rescanning...")
+        candidates = javaScanner.find_java_candidates()
+        if candidates:
+            target_java = candidates[0]["path"]
+            config_mgr.set_real_java_path(target_java)
+            config_mgr.save()
+            print(f"[{constants.PROXY_NAME}] Auto-selected Java: {target_java}")
+
+    # [第4层] 兜底：runtime 自带 Java（也要验证）
+    if not is_valid_java(target_java) and is_valid_java(tool_java):
+        target_java = tool_java
+
+    # [第5层] 仍然没有 → 这是唯一允许 exit 的地方
+    if not is_valid_java(target_java):
         print(f"[{constants.PROXY_NAME}] No usable Java found.", file=sys.stderr)
         sys.exit(1)
-    if not target_java or not os.path.exists(target_java):
-        c = javaScanner.find_java_candidates()
-        if c: target_java = c[0]["path"]; config_mgr.set_real_java_path(target_java); config_mgr.save()
-    if not target_java: target_java = tool_java
 
-    sniffer_java = tool_java if tool_java else target_java
+    # 嗅探器用 Java：优先 runtime，其次 target
+    sniffer_java = tool_java if is_valid_java(tool_java) else target_java
 
+    # [第6层] 无参数时直接探测
     if not raw_args:
-        subprocess.call([target_java]);
+        subprocess.call([target_java])
         sys.exit(0)
 
     # [1] 识别
