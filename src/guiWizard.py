@@ -1,10 +1,8 @@
 # src/guiWizard.py
-import sys
 import os
 import threading
 import tkinter
 import customtkinter as ctk
-from PIL import Image
 from tkinter import messagebox
 
 from src import constants, authAPI, javaScanner
