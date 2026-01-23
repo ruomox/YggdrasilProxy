@@ -1,0 +1,18 @@
+altgraph @ file:///opt/miniconda3/conda-bld/altgraph_1761911604495/work
+brotlicffi @ file:///opt/miniconda3/conda-bld/brotlicffi_1764961161648/work
+certifi @ file:///Users/ec2-user/croot/certifi_1767659246487/work/certifi
+cffi @ file:///opt/miniconda3/conda-bld/cffi_1761832774705/work
+charset-normalizer @ file:///opt/miniconda3/conda-bld/charset-normalizer_1761744820108/work
+cryptography @ file:///opt/miniconda3/conda-bld/cryptography-split_1761931962722/work
+customtkinter==5.2.2
+darkdetect==0.8.0
+idna @ file:///opt/miniconda3/conda-bld/idna_1761912005314/work
+macholib @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_30eamveilc/croot/macholib_1734039550440/work
+packaging @ file:///opt/miniconda3/conda-bld/packaging_1761049079066/work
+pillow @ file:///opt/miniconda3/conda-bld/pillow_1762528235719/work
+pycparser @ file:///opt/miniconda3/conda-bld/pycparser_1757496044852/work
+pyinstaller @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_9184gaslxm/croot/pyinstaller_1740594222051/work
+pyinstaller-hooks-contrib @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_82ld5cldwx/croot/pyinstaller-hooks-contrib_1740582474020/work
+PySocks @ file:///opt/miniconda3/conda-bld/pysocks_1761753010242/work
+requests @ file:///opt/miniconda3/conda-bld/requests_1762359591792/work
+urllib3 @ file:///Users/ec2-user/croot/urllib3_1767810410716/work
