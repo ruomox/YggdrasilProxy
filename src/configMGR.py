@@ -259,7 +259,6 @@ class ConfigManager:
 
     # --- Getters/Setters ---
 
-    # 【修复点】补上了缺失的 get_runtime_dir
     def get_runtime_dir(self):
         return self._runtime_dir
 

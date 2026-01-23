@@ -22,9 +22,7 @@ def _expand_path(p):
 
 
 def get_java_info(path):
-    """
-    [修改] 获取详细信息 (MacOS 架构精准识别修复版)
-    """
+    # 获取详细信息 (MacOS 架构精准识别修复版)
     if not _is_executable(path): return None
     try:
         startupinfo = None
@@ -62,7 +60,7 @@ def get_java_info(path):
         elif "64-bit" in lower_out or "x86_64" in lower_out or "amd64" in lower_out:
             arch_str = "x64"
 
-        # 3. 【核心修复】macOS 专属：使用 `file` 命令进行物理验身
+        # 3. macOS 专属：使用 `file` 命令进行物理验身
         # 解决部分 Java 只输出 "64-Bit" 导致无法区分 Intel/M1 的问题
         if platform.system() == "Darwin":
             try:
@@ -92,17 +90,10 @@ def get_java_info(path):
 
 
 def _scan_paths_fast():
-    # ... (保持原有的路径发现逻辑不变，篇幅原因省略，请保留你原文件中的 _scan_paths_fast 代码) ...
-    # 只需要把最后 return 的地方改为 path 集合即可
-    # 为了完整性，这里简写，请务必保留你发给我的 _scan_paths_fast 和 _scan_windows_registry 完整代码
     candidates = set()
     system = platform.system()
     exe_name = _get_java_exe_name()
 
-    # ... (此处插入你原有的 A, B, C, D, E 扫描逻辑) ...
-    # 如果你原文件里这部分没动，就直接用原文件的逻辑
-
-    # 既然你发了源码，我就把这部分补全，防止你复制漏了
     jh = os.environ.get("JAVA_HOME")
     if jh: candidates.add(os.path.join(jh, "bin", exe_name))
     try:
@@ -168,9 +159,7 @@ def _scan_local_runtime():
     return found_paths
 
 def find_java_candidates():
-    """
-    [修改] 返回详细信息列表
-    """
+    # 返回详细信息列表
     raw_paths = _scan_paths_fast()
     filtered = list(raw_paths)
 

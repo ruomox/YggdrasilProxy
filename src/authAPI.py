@@ -50,7 +50,7 @@ def refresh(refresh_url, access_token, client_token, selected_profile=None):
         "requestUser": True
     }
 
-    # 【关键修改】如果传入了角色信息，请求绑定该角色
+    # 如果传入了角色信息，请求绑定该角色
     if selected_profile:
         payload["selectedProfile"] = selected_profile
 

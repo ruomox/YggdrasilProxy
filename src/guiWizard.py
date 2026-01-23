@@ -168,7 +168,7 @@ class ModernWizard(ctk.CTk):
         self.game_dir = game_dir  # 【新增】保存实例路径
 
         self.title(f"{constants.PROXY_NAME} {I18n.t('window_title')}")
-        # --- 窗口居中 & 置顶 (修复) ---
+        # --- 窗口居中 & 置顶 ---
         w, h = 820, 500
         self.minsize(800, 500)
 
@@ -182,7 +182,7 @@ class ModernWizard(ctk.CTk):
 
         self.geometry(f"{w}x{h}+{x}+{y}")
 
-        # 【关键修复】强制将窗口置于所有窗口的最顶层 (Z轴)
+        # 强制将窗口置于所有窗口的最顶层 (Z轴)
         self.attributes("-topmost", True)
 
         # 可选：为了不影响后续切换窗口，可以在 1秒后取消强制置顶，或者就这样保留
@@ -452,7 +452,7 @@ class ModernWizard(ctk.CTk):
                 command=lambda c=code: self._change_language_quietly(c)
             )
 
-        # 【修改】直接在鼠标点击的绝对坐标处弹出 (更符合右键习惯)
+        # 直接在鼠标点击的绝对坐标处弹出 (更符合右键习惯)
         if event:
             menu.tk_popup(event.x_root, event.y_root)
         else:
@@ -773,7 +773,7 @@ class ModernWizard(ctk.CTk):
             raw=info.get('raw_info')
         )
 
-        # 【修改】使用自定义弹窗，宽600，高371
+        # 使用自定义弹窗
         self._show_custom_dialog(I18n.t("show_custom_dig_tit"), msg, 600, 371)
 
     # --- 启动 ---
@@ -784,7 +784,7 @@ class ModernWizard(ctk.CTk):
         if not self.current_auth_data:
             return messagebox.showwarning(I18n.t("on_launch_acc_tit"), I18n.t("on_launch_select_acc"))
 
-        # 【核心修复】直接使用内存中保存的真实路径
+        # 直接使用内存中保存的真实路径
         # 因为现在输入框里显示的是 "Java 17 (x64)" 这种短名字，不能直接用来启动
         final_path = getattr(self, "selected_java_path", None)
 

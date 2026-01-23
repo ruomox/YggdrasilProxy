@@ -19,7 +19,7 @@ KEY_FILENAME = "YggProxy.key"
 DATA_DIR_NAME = ".YggProxy"
 # 运行时子目录名
 RUNTIME_DIR_NAME = "YggProRuntime"
-JRE_DIR_NAME = "YggProJRE"
+JRE_DIR_NAME = "YggProJAVA"
 INJECTOR_FILENAME = "authlib-injector.jar"
 
 # 默认 API 列表模板

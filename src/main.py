@@ -3,8 +3,7 @@ import sys
 import os
 import subprocess
 import platform
-import re
-from src import constants, runtimeMGR, authAPI, guiWizard, javaScanner, pclCompat, preSetup
+from src import constants, runtimeMGR, authAPI, guiWizard, javaScanner, preSetup
 from src.configMGR import config_mgr
 
 
@@ -22,10 +21,10 @@ def parse_sniffer_output(output):
     for line in output.splitlines():
         line = line.strip()
         if "---YGGPROXY_SNIFFER_START---" in line:
-            is_capturing = True;
+            is_capturing = True
             continue
         if "---YGGPROXY_SNIFFER_END---" in line:
-            is_capturing = False;
+            is_capturing = False
             break
         if is_capturing: args_list.append(line)
     return args_list
@@ -348,7 +347,7 @@ def main():
         else:
             os.execv(launch_java, final_cmd)
     except Exception as e:
-        print(f"Error: {e}", file=sys.stderr);
+        print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
 
